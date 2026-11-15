@@ -24,3 +24,4 @@ repo; follow the link for the evidence.
 - 2026-11-14 · pcb · decision · the PCB gets solder jumpers for a no-FPGA build; the P4 detects the FPGA over I2C at boot and picks the decoder, so both builds share firmware images · `../p4vrx-plan.md`
 - 2026-11-14 · c6 · decision · no Wi-Fi needed; the C6 is either unused or runs custom ELRS backpack firmware · `../p4vrx-plan.md`
 - 2026-11-14 · repo · decision · MIT for new work, GPL-3.0-only for anything derived from C5VRX; Rake for tasks, mise for tool versions; the plan lives outside the repo · `../p4vrx-plan.md`
+- 2026-11-14 · p4-firmware · decision · the P4 runs pin and wiring sanity checks at every startup, on the breadboard and on the PCB, and reports any link that fails; with everything wired the checks test each connection (FPGA over I2C, C5 EN/BOOT, video bus, etc.), not bare-pin pulls · [wiring.md](wiring.md)
