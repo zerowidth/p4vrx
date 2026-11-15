@@ -61,6 +61,12 @@ namespace :p4 do
 end
 
 namespace :c5 do
+  desc "Build the C5 pin walk test firmware and flash it through the P4 bridge"
+  task :pinwalk do
+    local_idf "firmware/c5-pinwalk", "idf.py", "build"
+    c5_via_p4 "firmware/c5-pinwalk/build", "write-flash", "@flash_args"
+  end
+
   desc "Read the C5's chip ID through the P4 bridge"
   task :chip_id do
     c5_via_p4 ".", "chip-id"
