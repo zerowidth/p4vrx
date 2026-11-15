@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: MIT
 # Build the read-only reference extracts, to check they still build as baselines.
 
 namespace :ref do

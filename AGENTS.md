@@ -48,12 +48,11 @@ old assumption. Record numbers with units, not adjectives.
 
 ## Provenance and licence
 
-- New work is MIT (`LICENSE`).
+- New work is MIT (`LICENSE`). MIT files get no licence header.
 - Anything copied or ported from C5VRX stays GPL-3.0-only
   (`LICENSES/GPL-3.0.txt`) and keeps its notices. Give each such file an
-  `SPDX-License-Identifier: GPL-3.0-only` header and, when porting from
-  `reference/`, name the source file in the commit message.
-- Every new source file gets an SPDX header, so the split stays visible.
+  `SPDX-License-Identifier: GPL-3.0-only` header crediting C5VRX and, when
+  porting from `reference/`, name the source file in the commit message.
 - `reference/` is never edited. Port pieces out of it.
 - Keep the C5VRX credit in `README.md`.
 

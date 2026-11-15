@@ -40,4 +40,6 @@ mise exec -- eim install # run from this repo to get the right python version
 
 New work in this repository is under the MIT licence ([LICENSE](LICENSE)).
 
+Files without a licence header are MIT (see LICENSE); files adapted from C5VRX carry GPL-3.0-only headers.
+
 This project incorporates and adapts the C5 receive firmware (c5rx) and the P4 receiver firmware (p4usb), and builds on research findings, from [C5VRX](https://github.com/Twotoz/C5VRX) by Twotoz and the C5VRX contributors. Visit the [official C5VRX website](https://twotoz.github.io/C5VRX/) for the original project and its Discord invite. Files derived from C5VRX remain under GPL-3.0-only ([LICENSES/GPL-3.0.txt](LICENSES/GPL-3.0.txt)) and have SPDX headers saying so. Firmware images that include them are GPL-3.0 as a whole. See [reference/PROVENANCE.md](reference/PROVENANCE.md) for sources and revisions. This is not an official C5VRX release.

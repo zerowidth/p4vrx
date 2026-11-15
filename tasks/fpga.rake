@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: MIT
 # Tang Nano 20K gateware with the open toolchain (yosys, nextpnr-himbaechel, apicula, openFPGALoader).
 
 FPGA_DEVICE = "GW2AR-LV18QN88C8/I7"

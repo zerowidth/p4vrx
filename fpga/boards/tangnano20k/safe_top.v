@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 // Breadboard-safe bitstream: every pin wired to the C5 or P4 is a high-Z input,
 // pin 51 (speaker amp enable) is driven low, nothing else is driven.
 module safe_top (

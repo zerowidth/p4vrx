@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 #pragma once
 
 /* P4 header pins wired to the C5, per docs/wiring.md. */

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: MIT
 """Send console commands to the P4's USB console and print the replies: p4cmd.py CMD [CMD ...]."""
 import sys
 import time
