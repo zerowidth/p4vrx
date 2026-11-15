@@ -12,6 +12,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "tusb.h"
+#include "device/usbd_pvt.h"
 
 #include "bridge.h"
 #include "console.h"
@@ -110,9 +111,36 @@ void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts)
     }
 }
 
+/* The controller's interrupt mask, and its bit for a suspended bus. */
+#define DWC2_GINTMSK (*(volatile uint32_t *)0x50000018)
+#define GINTMSK_SUSPEND (1u << 11)
+
+/* The controller reports a suspend after 3 ms of silence and the stack then waits for its resume interrupt,
+ * which never comes when the host only paused, so the console stops reading and writing. A start of frame
+ * proves the bus is running, and the stack resumes on one. */
+static bool s_awaiting_sof;
+static uint32_t s_false_suspends;
+static uint32_t s_rx_bytes, s_tx_bytes, s_tx_dropped;
+
+void tud_resume_cb(void)
+{
+    if (!s_awaiting_sof) return;
+    s_awaiting_sof = false;
+    ++s_false_suspends;
+    tud_sof_cb_enable(false);
+    /* The stack masks the suspend interrupt until the resume interrupt. */
+    DWC2_GINTMSK |= GINTMSK_SUSPEND;
+}
+
 static void usb_task(void *arg)
 {
-    for (;;) tud_task();
+    for (;;) {
+        tud_task_ext(100, false);
+        if (tud_suspended() && !s_awaiting_sof) {
+            s_awaiting_sof = true;
+            tud_sof_cb_enable(true);
+        }
+    }
 }
 
 void usb_init(void)
@@ -135,7 +163,12 @@ void usb_init(void)
 
 void usb_console_info(void)
 {
-    say("usb console: mounted %d, suspended %d, DTR %d\n", tud_mounted(), tud_suspended(), tud_cdc_connected());
+    say("usb console: mounted %d, suspended %d, DTR %d, %lu false suspends, %lu bytes in, %lu out, %lu dropped, "
+        "%lu free to send, IN busy %d, OUT busy %d\n",
+        tud_mounted(), tud_suspended(), tud_cdc_connected(), (unsigned long)s_false_suspends,
+        (unsigned long)s_rx_bytes, (unsigned long)s_tx_bytes, (unsigned long)s_tx_dropped,
+        (unsigned long)tud_cdc_write_available(), usbd_edpt_busy(TUD_OPT_RHPORT, EP_CDC_IN),
+        usbd_edpt_busy(TUD_OPT_RHPORT, EP_CDC_OUT));
 }
 
 bool usb_console_connected(void)
@@ -152,9 +185,13 @@ void usb_console_write(const void *data, size_t len)
         tud_cdc_write_flush();
         p += n;
         len -= n;
+        s_tx_bytes += n;
         if (n) deadline = esp_timer_get_time() + WRITE_TIMEOUT_US;
         if (len) {
-            if (esp_timer_get_time() > deadline) return;
+            if (esp_timer_get_time() > deadline) {
+                s_tx_dropped += len;
+                return;
+            }
             vTaskDelay(1);
         }
     }
@@ -163,5 +200,7 @@ void usb_console_write(const void *data, size_t len)
 size_t usb_console_read(uint8_t *buf, size_t len, uint32_t timeout_ms)
 {
     if (!tud_cdc_available()) xSemaphoreTake(s_rx_ready, pdMS_TO_TICKS(timeout_ms));
-    return tud_cdc_read(buf, len);
+    uint32_t n = tud_cdc_read(buf, len);
+    s_rx_bytes += n;
+    return n;
 }

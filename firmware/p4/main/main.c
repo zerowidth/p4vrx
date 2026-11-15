@@ -6,6 +6,7 @@
 #include "bridge.h"
 #include "c5.h"
 #include "console.h"
+#include "pins.h"
 #include "usb.h"
 
 void app_main(void)
@@ -13,6 +14,7 @@ void app_main(void)
     /* Above the USB task, so the console and the flashing bridge keep up. */
     vTaskPrioritySet(NULL, 6);
     c5_init();
+    pins_init();
     console_init();
     usb_init();
     say("\np4vrx ready, type help\n> ");
