@@ -2,6 +2,8 @@
 python = "3.12"
 ruby = "latest"
 uv = "0.9"
+# yosys, nextpnr-himbaechel, apicula (gowin_pack) and openFPGALoader for the Tang Nano 20K.
+"github:YosysHQ/oss-cad-suite-build" = { version = "2026-11-14", bin_path = "oss-cad-suite/bin" }
 
 [env]
 # ESP-IDF itself is installed under ~/.espressif (EIM or install.sh); tasks/ports.rb checks this version.

@@ -6,6 +6,6 @@ Gateware for the Tang Nano 20K (GW2AR-18).
   CVBS decode, HDZero PHY, snapshot ring).
 - `sim/`: Verilator and cocotb benches, fed with real captures and checked against
   `../models`.
-- `boards/tangnano20k/`: pin constraints, PLL, top level.
+- `boards/tangnano20k/`: pin constraints, PLL, top level. `safe_top.v` is the breadboard-safe image. Build with `rake fpga:build` (see `../docs/topics/fpga-toolchain.md`).
 
 Nano pin 51 (speaker amp enable) is held low in every bitstream.
