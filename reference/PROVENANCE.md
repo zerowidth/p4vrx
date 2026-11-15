@@ -13,13 +13,13 @@ in the commit message. `rake ref:build` checks they still build.
 
 ## Source
 
-| | |
-| --- | --- |
-| Repository | `zerowidth/C5VRX`, fork of `Twotoz/C5VRX` |
-| Pushed so far | [zerowidth/C5VRX PR #3](https://github.com/zerowidth/C5VRX/pull/3), branch `p4usb` at `3dfac08` |
-| Extracted from | `bcf7743e89f16b8cdd71cd01bdd4d11028298e5d` (2026-11-07, "p4usb: decode straight into the encoder's 4:2:0, and drop the 4:2:2 frame"), 29 commits past PR #3, not yet pushed. It carries the H.264 UVC work |
-| Paths | `p4usb/`, `c5rx/`, `main/menu_font.h` |
-| Upstream base | `Twotoz/C5VRX` `main` at `c2f22be` |
+|                |                                                                                                                                                                                                                                                           |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Repository     | `zerowidth/C5VRX`, fork of `Twotoz/C5VRX`                                                                                                                                                                                                                 |
+| Source         | [zerowidth/C5VRX PR #3](https://github.com/zerowidth/C5VRX/pull/3), branch `p4usb` at `1431114c5bfdb511823f7684de328559f50e8c61` (2026-11-07, "p4usb: decode straight into the encoder's 4:2:0, and drop the 4:2:2 frame"). It carries the H.264 UVC work |
+| Extracted from | Local commit `bcf7743` before the branch was rebased and pushed. Its `p4usb/`, `c5rx/` and `main/menu_font.h` are identical to `1431114`                                                                                                                  |
+| Paths          | `p4usb/`, `c5rx/`, `main/menu_font.h`                                                                                                                                                                                                                     |
+| Upstream base  | Branched from `Twotoz/C5VRX` `main` at `8ed1045`                                                                                                                                                                                                          |
 
 ## Changes from the source
 
