@@ -1,8 +1,11 @@
 # Wiring
 
 Breadboard build: C5-Zero and Tang Nano 20K side by side on one breadboard, the
-P4 board plugged straight into a 40-pin T-breakout on the same breadboard.
-Go by the P4's silkscreen, not the breakout's Raspberry Pi labels.
+P4 board connected to a 40-pin T-breakout on the same breadboard by a ribbon
+cable, with a 2x20 male pin header between the P4 and the cable. That way each
+breakout pin matches the same P4 header pin. Plugging the P4 straight onto the
+breakout mirrors the pinout, and the breakout's GND/3V3/5V ties then short P4
+GPIOs. Go by the P4's silkscreen, not the breakout's Raspberry Pi labels.
 
 ## P4 header
 
