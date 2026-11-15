@@ -1,0 +1,8 @@
+[tools]
+python = "3.12"
+ruby = "latest"
+uv = "0.9"
+
+[env]
+# ESP-IDF itself is installed under ~/.espressif (EIM or install.sh); tasks/ports.rb checks this version.
+IDF_VERSION = "v6.1"

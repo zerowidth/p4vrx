@@ -1,0 +1,26 @@
+# Ledger
+
+One line per result, dead end or decision, oldest first. Append at the bottom.
+
+Format: `- YYYY-MM-DD · area · result|dead end|decision · what, with numbers · link`
+
+Lines dated 2026-11-14 and marked "seeded" summarize earlier work outside this
+repo; follow the link for the evidence.
+
+- 2026-11-14 · c5-lanes · result · seeded: MODEM_DIAG carries 10-bit two's-complement Q (bits 0-9) and I (bits 10-19), changing at ~80 MS/s; the C5 exports the top 7 of each on 14 lanes, and the P4 reads each as 2v+1 · `C5VRX/docs/p4-receiver-findings.md`
+- 2026-11-14 · c5-lanes · result · seeded: all 8 upper bits of I and Q are live; 8+8 needs 17 C5 pads (16 lanes + clock), which costs the UART or BOOT pads · `C5VRX/docs/p4-receiver-plan.md`
+- 2026-11-14 · c5-lanes · result · seeded: I has a DC offset that grows with gain (~20 of ±127 at gain 64, ~32 at 68); the phase lookup must be built around the measured offset · `C5VRX/docs/p4-receiver-findings.md`
+- 2026-11-14 · p4-capture · result · seeded: ~3 in 10 C5 starts sample the lanes mid-change (~18 dB more noise); slipping the C5's clock until the lanes read steady gave 38 clean starts in 38 · `C5VRX/docs/p4-receiver-findings.md`
+- 2026-11-14 · p4-demod · result · seeded: a 7+7-bit phase table isn't worth its 32 KB; the BitScrambler companded lookup (4 cycles a sample) reads all 7 bits of each and is what the decoder uses · `C5VRX/docs/p4-receiver-findings.md`
+- 2026-11-14 · p4-cpu · result · seeded: moving the phase lookup to the BitScrambler took P4 core 1 from 83% to 41%; the rest of analog decode still keeps both cores busy, so decode + LCD + UVC on the P4 alone is expected to be over budget · thread "FPGA front end for HDZero"
+- 2026-11-14 · hdzero · result · seeded: the C5's 40 MS/s, 7-bit I/Q decodes HDZero 720p60 in full colour offline; 2 of 4 captures clean, gain 70 clips, gain ~58 is good, ~1 bin of CFO, weak top band edge past bin 200 · `hdzero-captures/README.md`, `hdzero-captures/docs/findings.md`
+- 2026-11-14 · hdzero · result · seeded: cyclic-prefix correlation at the 1024-sample symbol lag peaks 3-7x the mean on real captures; analog shows no peak, so it works as a cheap always-on detector · `hdzero-captures/docs/decoding.md`
+- 2026-11-14 · uvc · result · seeded: p4usb sends H.264 over UVC at 720x480 60 fps, 8 Mbit/s, keyframe every 30 frames, no B-frames, min QP 26; `video bitrate N` tunes it live · C5VRX `bcf7743`, thread "Switch P4USB receiver to H.264"
+- 2026-11-14 · flashing · result · seeded: the P4 flashes over its high-speed USB through the ROM loader (p4usb reboots into it), and the C5 flashes through p4usb's esptool bridge, so neither needs its own cable · `C5VRX/Rakefile`
+- 2026-11-14 · c6 · result · Waveshare schematic: the C6 is on SDIO (P4 GPIO 14-19), P4 GPIO 54 drives its EN and GPIO 6 its IO2; its UART0 and IO9 (BOOT) reach only the unpopulated 4-pin pad row P1 · `ESP32-P4-WIFI6-Touch-LCD-4.3/schematic/`
+- 2026-11-14 · wiring · decision · P4 header GPIO 24/25 (USB D-/D+) and 37/38 (CH343P console) stay unused; the other 20 are assigned per wiring.md · [wiring.md](wiring.md)
+- 2026-11-14 · wiring · decision · C5 back pads 23/24/25/28 and the RESET pad (EN) are wired out to a short header strip; EN is driven open-drain by P4 GPIO 34, BOOT by GPIO 35 · [wiring.md](wiring.md)
+- 2026-11-14 · c5-lanes · decision · keep 7+7 lanes plus the sample clock: the no-FPGA build needs the clock, and it is proven. 8+8 (BOOT pad as a lane, or clockless FPGA capture) is an HDZero-phase experiment · `../p4vrx-plan.md`
+- 2026-11-14 · pcb · decision · the PCB gets solder jumpers for a no-FPGA build; the P4 detects the FPGA over I2C at boot and picks the decoder, so both builds share firmware images · `../p4vrx-plan.md`
+- 2026-11-14 · c6 · decision · no Wi-Fi needed; the C6 is either unused or runs custom ELRS backpack firmware · `../p4vrx-plan.md`
+- 2026-11-14 · repo · decision · MIT for new work, GPL-3.0-only for anything derived from C5VRX; Rake for tasks, mise for tool versions; the plan lives outside the repo · `../p4vrx-plan.md`

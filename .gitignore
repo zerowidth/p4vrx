@@ -1,1 +1,20 @@
 .claude
+.DS_Store
+__pycache__/
+.venv/
+
+# ESP-IDF
+build/
+build-*/
+managed_components/
+sdkconfig
+sdkconfig.old
+
+# FPGA build output
+fpga/build/
+*.fs
+*.vcd
+*.fst
+
+# Captures, snapshots and golden frames are large; keep them out of git
+captures/
