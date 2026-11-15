@@ -50,8 +50,9 @@ def main(seconds=12):
     while time.time() < end:
         nano.reset_input_buffer()
         nano.write(b"r")
-        f = dict(x.split("=") for x in nano.readline().decode().split())
-        samples.append((time.time(), int(f["c5"], 16)))
+        line = nano.readline().decode(errors="replace").split()
+        if len(line) == 3 and all(t.count("=") == 1 for t in line):
+            samples.append((time.time(), int(dict(t.split("=") for t in line)["c5"], 16)))
     stop.set()
     t.join()
     p4.write(b"\rc5 log off\r")

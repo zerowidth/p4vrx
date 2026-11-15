@@ -28,11 +28,14 @@ Is every wire in [wiring.md](../wiring.md) connected to the right pin at both en
 - First run: D2 and D1 (P4 GPIO 46, 47) failed P4 to Nano only. GPIO 39-48 are powered by the P4's LDO channel 4, which nothing had enabled; with it at 3.3 V they pass. The Nano had also driven 3.3 V into that unpowered bank during the reverse test.
 - First C5 run: Q4 and I6 read high whatever the C5 did. Nano 85 and 80 have pull-ups on the Nano board, so a walking one can't see them; the high/low comparison can, and both pass.
 
+### Rerun with IRQ and I2C wired
+
+Wired IRQ (P4 52) and the I2C pair (P4 7/8). All 18 P4 and Nano wires pass both ways, and all 15 C5 lanes pass, with no shorts. `safe_top` is now in the Nano's flash too, so it comes up safe after a power cycle.
+
 ## Verdict
 
-The 15 C5 lanes, the 15 P4 lanes and the C5 control lines are wired right. IRQ and I2C are not connected.
+Every wire in `wiring.md` is connected to the right pin at both ends.
 
 ## Next
 
-- Check the IRQ and I2C jumpers, then rerun `rake pins:check`.
 - The P4 USB console stalls after a few replies (see [p4-firmware.md](../topics/p4-firmware.md)), so the check runs over the CH343.

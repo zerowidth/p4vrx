@@ -60,9 +60,12 @@ class Nano:
         time.sleep(0.005)
 
     def read(self):
-        self.s.reset_input_buffer()
-        self.s.write(b"r")
-        line = self.s.readline().decode().split()
+        for _ in range(5):
+            self.s.reset_input_buffer()
+            self.s.write(b"r")
+            line = self.s.readline().decode(errors="replace").split()
+            if len(line) == 3 and all(t.count("=") == 1 for t in line):
+                break
         f = dict(t.split("=") for t in line)
         p4, i2c = int(f["p4"], 16), int(f["i2c"], 16)
         return [(p4 >> (15 - i)) & 1 for i in range(16)] + [(i2c >> 1) & 1, i2c & 1]

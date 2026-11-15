@@ -23,4 +23,4 @@ The Nano's onboard BL616 enumerates as an FT2232 (USB 0403:6010, product "USB De
 
 `fpga/boards/tangnano20k/safe_top.v` with `safe_top.cst` is the breadboard-safe image. Every pin wired to the C5 or P4 (per [wiring.md](../wiring.md)) is an explicit input buffer with `PULL_MODE=NONE`, so it stays high-Z. Pin 51 is driven low. A heartbeat counter on the 27 MHz clock (pin 4) stays internal. The input buffers carry `(* keep *)` so yosys doesn't drop the unused inputs and leave those pins to the packer's default.
 
-First build (2026-11-15): 35/384 IOB, 27 LUT4, 26 ALU, 25 DFF; 439 MHz max on the 27 MHz clock. SRAM load succeeded.
+First build (2026-11-15): 35/384 IOB, 27 LUT4, 26 ALU, 25 DFF; 439 MHz max on the 27 MHz clock. SRAM load succeeded. On 2026-11-15 `safe_top` was also written to the Nano's flash, so the Nano boots safe after a power cycle.
