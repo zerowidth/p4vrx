@@ -60,6 +60,8 @@ that sits in the breadboard. EN is the RESET pad that reads ~10k to 3V3; the
 other pad reads 0 ohm to GND. Add a second ground from the USB-C shell's front
 tab.
 
+C5 pins 13 and 14 are its USB D- and D+, so the C5's own USB port is unused while those lanes are wired; with them connected it doesn't enumerate. Flashing and the console go through the P4 over UART, with BOOT and EN. C5 firmware must disable USB-Serial-JTAG and claim 13/14 as GPIO. To recover the C5 over USB, pull the jumpers on 13 and 14 (Nano 49 and 86).
+
 ## Tang Nano 20K
 
 - Pin 51 (speaker amp enable): held low in every bitstream.
