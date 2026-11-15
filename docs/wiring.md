@@ -37,6 +37,8 @@ P4 console on the CH343P) stay unused.
 | 8 | I2C SCL | Nano 53 | Shared with the GT911 touch controller |
 | 7 | I2C SDA | Nano 52 | Shared with the GT911 touch controller |
 
+P4 GPIO 39-48 (D2..D0) are powered by the P4's LDO channel 4, which the firmware sets to 3.3 V at boot; nothing may drive them before that.
+
 In pass-through, D13..D7 carry Q7..Q1 and D6..D0 carry I7..I1 (to be confirmed
 against the P4 firmware's PARLIO lane order when it's written).
 
@@ -65,6 +67,7 @@ C5 pins 13 and 14 are its USB D- and D+, so the C5's own USB port is unused whil
 ## Tang Nano 20K
 
 - Pin 51 (speaker amp enable): held low in every bitstream.
+- Pins 80 and 85 (C5 I6 and Q4) have pull-ups on the Nano board, so they read high when undriven.
 - Its 3 GND pins and the HDMI connector shell go to the ground rails.
 - Powered from its own USB-C while plugged into the Mac. Don't also feed its 5V
   pin from the P4. Grounds are always common.

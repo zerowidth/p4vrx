@@ -27,6 +27,8 @@ mise install   # Python 3.12, Ruby, uv, OSS CAD Suite (FPGA tools)
 rake -T        # tasks
 ```
 
+`rake p4:flash` flashes the P4. The C5 flashes through the P4 (`rake c5:chip_id` checks the link); its own USB is unused. `rake pins:check` checks the breadboard wiring. See [docs/topics/p4-firmware.md](docs/topics/p4-firmware.md).
+
 ### ESP-IDF
 
 ESP-IDF lives outside the repo under `~/.espressif`, managed by EIM. The version is `IDF_VERSION` in `mise.toml` (v6.1), and `tasks/ports.rb` looks for `~/.espressif/tools/activate_idf_v6.1.sh`.

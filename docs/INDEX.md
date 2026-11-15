@@ -13,6 +13,7 @@ experiment changes them; the ledger and experiment notes keep the history.
 | Experiment write-ups | [experiments/](experiments/) ([template](experiments/TEMPLATE.md)) |
 | Living topic docs | [topics/](topics/) |
 | FPGA toolchain, rake tasks, safe bitstream | [topics/fpga-toolchain.md](topics/fpga-toolchain.md) |
+| P4 firmware: console, C5 bridge, IO supply, wiring check | [topics/p4-firmware.md](topics/p4-firmware.md) |
 | Where the reference firmware came from | [../reference/PROVENANCE.md](../reference/PROVENANCE.md) |
 
 ## Elsewhere in `~/Documents/projects/fpv`
