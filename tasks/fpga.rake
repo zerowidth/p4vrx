@@ -29,7 +29,7 @@ namespace :fpga do
        "read_verilog #{verilog.join(" ")}; synth_gowin -top #{FPGA_TOP} -json #{json}; stat"
     sh fpga_tool("nextpnr-himbaechel"), "--json", json, "--write", pnr,
        "--device", FPGA_DEVICE, "--vopt", "family=#{FPGA_FAMILY}",
-       "--vopt", "cst=#{FPGA_BOARD_DIR}/tangnano20k.cst", "--freq", "27",
+       "--vopt", "cst=#{FPGA_BOARD_DIR}/#{FPGA_TOP}.cst", "--freq", "27",
        "--report", "#{FPGA_BUILD}/report.json", "--log", "#{FPGA_BUILD}/nextpnr.log", "-q"
     sh fpga_tool("gowin_pack"), "-d", FPGA_FAMILY, "-o", FPGA_BITSTREAM, pnr
   end
