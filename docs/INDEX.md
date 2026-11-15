@@ -11,7 +11,8 @@ experiment changes them; the ledger and experiment notes keep the history.
 | Breadboard wiring and pin budget | [wiring.md](wiring.md) |
 | Text control protocol on the P4's console | [protocol.md](protocol.md) |
 | Experiment write-ups | [experiments/](experiments/) ([template](experiments/TEMPLATE.md)) |
-| Living topic docs | [topics/](topics/) (none yet) |
+| Living topic docs | [topics/](topics/) |
+| FPGA toolchain, rake tasks, safe bitstream | [topics/fpga-toolchain.md](topics/fpga-toolchain.md) |
 | Where the reference firmware came from | [../reference/PROVENANCE.md](../reference/PROVENANCE.md) |
 
 ## Elsewhere in `~/Documents/projects/fpv`

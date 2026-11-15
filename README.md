@@ -23,7 +23,7 @@ Status: planning and bench bring-up. Nothing here is usable yet.
 ## Setup
 
 ```sh
-mise install   # Python 3.12, Ruby, uv
+mise install   # Python 3.12, Ruby, uv, OSS CAD Suite (FPGA tools)
 rake -T        # tasks
 ```
 

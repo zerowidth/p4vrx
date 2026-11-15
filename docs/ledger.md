@@ -25,3 +25,4 @@ repo; follow the link for the evidence.
 - 2026-11-14 · c6 · decision · no Wi-Fi needed; the C6 is either unused or runs custom ELRS backpack firmware · `../p4vrx-plan.md`
 - 2026-11-14 · repo · decision · MIT for new work, GPL-3.0-only for anything derived from C5VRX; Rake for tasks, mise for tool versions; the plan lives outside the repo · `../p4vrx-plan.md`
 - 2026-11-14 · p4-firmware · decision · the P4 runs pin and wiring sanity checks at every startup, on the breadboard and on the PCB, and reports any link that fails; with everything wired the checks test each connection (FPGA over I2C, C5 EN/BOOT, video bus, etc.), not bare-pin pulls · [wiring.md](wiring.md)
+- 2026-11-15 · fpga · result · open toolchain (OSS CAD Suite 2026-11-14, pinned in mise.toml) builds and SRAM-loads the safe bitstream on the Nano 20K: wired pins are no-pull inputs, pin 51 low; 35 IOB, 25 DFF, 439 MHz on the 27 MHz clock · [topics/fpga-toolchain.md](topics/fpga-toolchain.md)
