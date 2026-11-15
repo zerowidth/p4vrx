@@ -14,6 +14,23 @@ def fpga_tool(name)
   found.empty? ? abort("#{name} not found; run mise install") : found
 end
 
+# openFPGALoader can hang at "Erase SRAM"; `openFPGALoader -b tangnano20k -r` (reconfigure from flash) clears it.
+def fpga_loader(*args, seconds: 120)
+  cmd = [fpga_tool("openFPGALoader"), "-b", "tangnano20k", *args]
+  puts cmd.join(" ")
+  pid = Process.spawn(*cmd)
+  deadline = Time.now + seconds
+  until Process.wait(pid, Process::WNOHANG)
+    if Time.now > deadline
+      Process.kill("TERM", pid)
+      Process.wait(pid)
+      abort "openFPGALoader timed out after #{seconds} s; try openFPGALoader -b tangnano20k -r"
+    end
+    sleep 0.2
+  end
+  abort "openFPGALoader failed" unless $?.success?
+end
+
 namespace :fpga do
   sources = Dir["#{FPGA_BOARD_DIR}/*.v", "#{FPGA_BOARD_DIR}/*.cst", "fpga/rtl/**/*.v"]
 
@@ -36,12 +53,12 @@ namespace :fpga do
 
   desc "Load #{FPGA_BITSTREAM} into the Nano's SRAM (lost at power off)"
   task load: :build do
-    sh fpga_tool("openFPGALoader"), "-b", "tangnano20k", FPGA_BITSTREAM
+    fpga_loader FPGA_BITSTREAM
   end
 
   desc "Write #{FPGA_BITSTREAM} to the Nano's flash (kept across power cycles)"
   task flash: :build do
-    sh fpga_tool("openFPGALoader"), "-b", "tangnano20k", "-f", FPGA_BITSTREAM
+    fpga_loader "-f", FPGA_BITSTREAM, seconds: 300
   end
 
   desc "List the cables and FPGA openFPGALoader sees on the Nano"

@@ -17,6 +17,8 @@ Release 2026-11-14 ships yosys 0.71+34, nextpnr-0.11.1-92-g5e2718b6, apycula 0.3
 - `rake fpga:flash` writes it to the Nano's flash.
 - `rake fpga:detect` checks the JTAG chain.
 
+openFPGALoader sometimes hangs at "Erase SRAM" (seen twice on 2026-11-15, after several loads). The load tasks give up after 120 s. `openFPGALoader -b tangnano20k -r` reconfigures the FPGA from flash, which clears it, and the next SRAM load works.
+
 The Nano's onboard BL616 enumerates as an FT2232 (USB 0403:6010, product "USB Debugger", manufacturer SIPEED), not 359f. `openFPGALoader -b tangnano20k` finds it by that ID.
 
 ## Safe bitstream
