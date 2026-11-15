@@ -7,6 +7,8 @@
 #define C5_UART UART_NUM_1
 
 void c5_init(void);
+/* Holds EN low until the next reset or boot. */
+void c5_hold(void);
 /* Pulses EN with BOOT released, so the C5 runs its app. */
 void c5_run(void);
 /* Pulses EN with BOOT held low, so the C5 enters its ROM loader. */

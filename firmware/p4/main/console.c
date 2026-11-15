@@ -66,7 +66,7 @@ static const command_t s_commands[] = {
     {"help", cmd_help, "list commands"},
     {"info", cmd_info, "firmware version, chip revision, uptime and bridge counters"},
     {"reboot", cmd_reboot, "restart the P4; reboot download enters its ROM loader"},
-    {"c5", c5_command, "c5 reset runs the C5's app; c5 boot resets it into its ROM loader"},
+    {"c5", c5_command, "c5 hold keeps it in reset; c5 reset runs its app; c5 boot resets it into its ROM loader; c5 pins reads EN, BOOT, RX and TX with pull-downs; c5 log on|off relays its UART"},
 };
 
 static void cmd_help(int argc, char **argv)
