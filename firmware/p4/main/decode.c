@@ -1820,7 +1820,7 @@ static bool start(const char *channel, bool force)
     return probed;
 }
 
-static char s_channel[8] = "R4";
+static char s_channel[8] = "R3";
 static unsigned s_mhz;
 
 static void status(void)
@@ -2071,18 +2071,21 @@ static void save_channel(void)
 static void autostart_task(void *arg)
 {
     nvs_handle_t nvs;
+    char saved[sizeof s_channel] = "";
     if (nvs_open("p4vrx", NVS_READONLY, &nvs) == ESP_OK) {
-        size_t len = sizeof s_channel;
-        char saved[sizeof s_channel];
-        if (nvs_get_str(nvs, "channel", saved, &len) == ESP_OK) strlcpy(s_channel, saved, sizeof s_channel);
+        size_t len = sizeof saved;
+        if (nvs_get_str(nvs, "channel", saved, &len) != ESP_OK) saved[0] = '\0';
         nvs_close(nvs);
     }
-    say("decode: starting on %s\n", s_channel);
-    if (decode_start(NULL)) place_by_noise();
+    if (saved[0]) {
+        strlcpy(s_channel, saved, sizeof s_channel);
+        say("decode: starting on %s\n", s_channel);
+        if (decode_start(NULL)) place_by_noise();
+    }
     vTaskDelete(NULL);
 }
 
-/* Starts decoding at power-up on the last channel started by hand, on a task of its own so the console
+/* Starts decoding at power-up on the last channel started by hand, if any, on a task of its own so the console
  * answers meanwhile. */
 void decode_autostart(void)
 {
