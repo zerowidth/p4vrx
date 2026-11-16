@@ -30,7 +30,7 @@ The Nano's `passthru_top` registers the C5's 14 lanes on its sample clock and dr
 
 C5 requests turn the Nano's bus off for each exchange (`c5 pause on`, the default). With `c5 pause off`, 200 of 200 pings and gain steps passed while decoding, but three `decode on` starts in a row failed with lost replies, so the pause stays. Each pause stops the samples for 4-26 ms, and the automatic gain sends a request every few seconds on a weak signal. The decoder takes a gap between DMA nodes as lost lines: the field is cut and the next vertical sync is believed wherever it lands ([experiment](../experiments/2026-11-16-vsync-after-bus-pause.md)).
 
-A vertical sync is believed only when a second broad pulse follows the first by half a line (or a line, when the detector is skipping to each hsync), and when the first starts within 3 us of a line's start or middle. Noise that ran into an hsync passed the old one-pulse test and moved the picture for four fields. `decode events` lists the last 64 sync events and `decode nodes` the bus stops since last asked.
+A vertical sync is believed only when a second broad pulse follows the first by half a line (or a line, when the detector is skipping to each hsync), and when the first starts within 3 us of a line's start or middle. Noise that ran into an hsync passed the old one-pulse test and moved the picture for four fields. `decode events` lists the last 64 sync events and gain steps and `decode nodes` the bus stops since last asked.
 
 ## Tasks
 

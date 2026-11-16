@@ -33,5 +33,5 @@ Adopted. The bus pause stays on, and the decoder now treats a bus stop as lost l
 
 ## Next
 
-- Each gain step still costs a cut field. The gain control could step less often on a weak signal, or the UART could move off the bus wiring on the PCB so the pause can go.
+- Each gain step still costs a cut field. `decode events` now logs gain steps (new gain, RMS, clipping in tenths of a percent). Settled at gain 74 with tip noise 327 kHz, the gain control made no step in two minutes, so it needs no change. The pause can go once the UART is off the bus wiring on the PCB.
 - After autostart the status shows `R4 (0 MHz)`: the tune reply's frequency was not parsed. This is cosmetic.

@@ -277,7 +277,7 @@ typedef struct {
     int16_t vline, into;
     uint8_t kind, missed;
 } sync_event_t;
-enum { EV_JUMP, EV_IGNORED, EV_REACQUIRE, EV_PARITY, EV_RELOAD };
+enum { EV_JUMP, EV_IGNORED, EV_REACQUIRE, EV_PARITY, EV_RELOAD, EV_GAIN };
 #define SYNC_EVENTS 64
 static sync_event_t s_events[SYNC_EVENTS];
 static uint32_t s_event_count;
@@ -405,6 +405,9 @@ static void steer_gain(bool rms_known)
         return;
     }
     waited = 0;
+    /* For a gain step the event holds the new gain, the RMS and the clipping in tenths of a percent, capped. */
+    s_events[s_event_count++ % SYNC_EVENTS] =
+        (sync_event_t){s_fields, gain, s_rms, EV_GAIN, s_clip_permille > 255 ? 255 : s_clip_permille};
     set_gain(gain);
 }
 
@@ -2216,7 +2219,7 @@ void decode_command(int argc, char **argv)
         s_node_gaps = 0;
         s_node_gap_total_us = s_node_gap_max_us = 0;
     } else if (strcmp(sub, "events") == 0) {
-        static const char *names[] = {"jump", "ignored", "reacquire", "parity", "reload"};
+        static const char *names[] = {"jump", "ignored", "reacquire", "parity", "reload", "gain"};
         uint32_t n = s_event_count < SYNC_EVENTS ? s_event_count : SYNC_EVENTS;
         say("%lu sync events, the last %lu (field, kind, line count, samples from the line clock, lines missed):\n",
             (unsigned long)s_event_count, (unsigned long)n);
