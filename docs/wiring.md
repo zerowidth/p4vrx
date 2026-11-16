@@ -14,7 +14,7 @@ P4 console on the CH343P) stay unused.
 
 Pi pins 26 and 28 (J3 25 and 27) are USBD_N and USBD_P, the high-speed USB pair that also goes to the board's USB-C port. They must stop at the P4: carried down the ribbon and breakout, the stubs broke the 480 Mbit/s link, which stalled after a few replies or never enumerated. Leave those two ribbon conductors unconnected (pull the pins from the gender changer or cut the conductors). The PCB must not route them anywhere.
 
-Waveshare's schematic (J3) numbers the header's columns opposite to the Raspberry Pi convention: each odd/even pair is swapped, so J3 pin n is Pi pin n+1 for odd n and n-1 for even n. In Pi numbering, which the breakout's silkscreen uses, the power pins sit where a Pi has them: GND on 6, 9, 14, 20, 25, 30, 34, 39, 3V3 on 1 and 17, 5V on 2 and 4. The mapping is checked physically only through the pin check (every GPIO below drives and reads at its far end) and the USB fix; the ground positions are pending a continuity check.
+Waveshare's schematic (J3) numbers the header's columns opposite to the Raspberry Pi convention: each odd/even pair is swapped, so J3 pin n is Pi pin n+1 for odd n and n-1 for even n. In Pi numbering, which the breakout's silkscreen uses, the power pins sit where a Pi has them: GND on 6, 9, 14, 20, 25, 30, 34, 39, 3V3 on 1 and 17, 5V on 2 and 4. The header is physically Pi-compatible: the breakout's 5V, 5V and GND at Pi pins 2, 4 and 6 line up with J3 pins 1, 3 and 5, the pin check passes for every GPIO below, and the USB fix removed Pi pins 26/28. Wire by Pi numbering.
 
 | Pi pins | J3 pins | Odd Pi pin | Even Pi pin |
 | --- | --- | --- | --- |
