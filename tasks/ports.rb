@@ -28,28 +28,66 @@ def usb_ports
   IO.popen([IDF_PYTHON, "-c", script], &:read).lines.map(&:split)
 end
 
-# The one port matching the first USB ID that has any. PORT overrides; SERIAL picks
-# one board when several share an ID.
+# Environment variables (set in mise.local.toml) that pin a USB ID to one board's serial number, so tasks
+# never pick another board that shares the ID. A ROM loader reports the MAC with colons, the app without.
+SERIAL_PINS = {
+  USB_IDS[:p4_console] => "P4VRX_P4_USB_SERIAL",
+  USB_IDS[:p4_rom] => "P4VRX_P4_USB_SERIAL",
+  USB_IDS[:p4_uart] => "P4VRX_P4_UART_SERIAL",
+  "0403:6010" => "P4VRX_NANO_SERIAL"
+}.freeze
+
+# [env] from mise.local.toml, for rake run outside mise; the process environment wins.
+LOCAL_ENV = begin
+  path = File.expand_path("../mise.local.toml", __dir__)
+  section = nil
+  File.exist?(path) ? File.readlines(path).each_with_object({}) do |line, env|
+    line = line.sub(/#.*/, "").strip
+    if line.start_with?("[") then section = line
+    elsif section == "[env]" && line.include?("=")
+      k, v = line.split("=", 2)
+      env[k.strip] = v.strip.delete('"')
+    end
+  end : {}
+end.freeze
+
+def pin_env(name)
+  ENV[name] || LOCAL_ENV[name]
+end
+
+def same_serial?(a, b)
+  a.to_s.delete(":").casecmp?(b.to_s.delete(":"))
+end
+
+# The ports with this USB ID, narrowed to the pinned serial if one is set.
+def pinned_ports(ports, id)
+  found = ports.select { |_, i, _| i == id }
+  pin = pin_env(SERIAL_PINS[id].to_s)
+  pin && !pin.empty? ? found.select { |_, _, s| same_serial?(s, pin) } : found
+end
+
+# The one port matching the first USB ID that has any. PORT overrides. With several boards sharing an ID and
+# no serial pinned for it, it refuses rather than guess.
 def port_for(name, *ids)
   return ENV["PORT"] if ENV["PORT"]
 
   ports = usb_ports
-  ports = ports.select { |_, _, s| s == ENV["SERIAL"] } if ENV["SERIAL"]
   ids.each do |id|
-    found = ports.select { |_, i, _| i == id }
+    found = pinned_ports(ports, id)
     next if found.empty?
     if found.size > 1
-      abort "several #{name} ports (#{found.map { |d, _, s| "#{d} serial #{s}" }.join(", ")}); set SERIAL or PORT"
+      abort "several #{name} ports (#{found.map { |d, _, s| "#{d} serial #{s}" }.join(", ")}); " \
+            "set #{SERIAL_PINS[id] || "PORT"} in mise.local.toml"
     end
     return found.first.first
   end
-  abort "no #{name} port found; plug it in or set PORT"
+  abort "no #{name} port found; plug it in, check #{ids.map { |i| SERIAL_PINS[i] }.compact.uniq.join("/")}, or set PORT"
 end
 
 def wait_for_port(name, id, seconds: 10)
   deadline = Time.now + seconds
   until Time.now > deadline
-    found = usb_ports.find { |_, i, _| i == id }
+    found = pinned_ports(usb_ports, id).first
     return found.first if found
     sleep 0.2
   end

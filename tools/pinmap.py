@@ -3,8 +3,12 @@ Nano running fpga/boards/tangnano20k/pintest_top. Prints one line per wire: ok, 
 import sys
 import time
 
+import pathlib
+
 import serial
-from serial.tools.list_ports import comports
+
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
+from boards import port  # noqa: E402
 
 # Name, P4 GPIO, Nano pin; order matches the Nano's p4 bits 15..0, then i2c bits 1..0.
 LANES = [("PCLK", 4, 26), ("D13", 2, 29), ("D12", 3, 30), ("D11", 21, 31), ("D10", 22, 15), ("D9", 5, 16),
@@ -14,13 +18,8 @@ I2C = [("SCL", 8, 53), ("SDA", 7, 52)]
 WIRES = LANES + I2C
 
 
-def find(vid, pid, pick=None):
-    ports = sorted(p.device for p in comports() if (p.vid, p.pid) == (vid, pid))
-    if pick is not None:
-        ports = [p for p in ports if p.endswith(pick)]
-    if len(ports) != 1:
-        sys.exit(f"expected one {vid:04x}:{pid:04x} port, found {ports}")
-    return ports[0]
+def find(vid, pid, pick=""):
+    return port(vid, pid, pick)
 
 
 class P4:
@@ -87,7 +86,7 @@ def verdict(i, seen, idle):
 def main():
     # The CH343 UART console: the USB console still stalls after a few replies.
     p4 = P4(find(0x1A86, 0x55D3))
-    nano = Nano(find(0x0403, 0x6010, pick="1"))
+    nano = Nano(find(0x0403, 0x6010, "1"))
     p4.cmd("pins release")
     nano.send(b"z")
     idle_nano, idle_p4 = nano.read(), p4.read()

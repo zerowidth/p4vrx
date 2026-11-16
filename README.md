@@ -27,6 +27,8 @@ mise install   # Python 3.12, Ruby, uv, OSS CAD Suite (FPGA tools)
 rake -T        # tasks
 ```
 
+Copy `mise.local.toml.example` to `mise.local.toml` and fill in the boards' USB serials (`rake ports` lists them): `P4VRX_P4_UART_SERIAL`, `P4VRX_P4_USB_SERIAL` and `P4VRX_NANO_SERIAL`. Rake and `tools/` then only open those boards, and refuse to guess when another P4 or Nano shares the USB ID.
+
 `rake p4:flash` flashes the P4. The C5 flashes through the P4 (`rake c5:chip_id` checks the link); its own USB is unused. `rake pins:check` checks the breadboard wiring. See [docs/topics/p4-firmware.md](docs/topics/p4-firmware.md).
 
 ### ESP-IDF

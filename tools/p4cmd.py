@@ -3,16 +3,16 @@
 import sys
 import time
 
+import pathlib
+
 import serial
-from serial.tools.list_ports import comports
+
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
+from boards import port  # noqa: E402
 
 
 def console_port(uart=False):
-    vid_pid = (0x1A86, 0x55D3) if uart else (0x303A, 0x8000)
-    ports = [p.device for p in comports() if (p.vid, p.pid) == vid_pid]
-    if len(ports) != 1:
-        sys.exit(f"expected one P4 console ({vid_pid[0]:04x}:{vid_pid[1]:04x}), found {ports}")
-    return ports[0]
+    return port(0x1A86, 0x55D3) if uart else port(0x303A, 0x8000)
 
 
 def open_console(uart=False):

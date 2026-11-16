@@ -1,5 +1,5 @@
 """Start the P4's NTSC decoder and save one decoded 720x480 frame as a colour PNG: grab.py [channel] [-u].
-Talks to the P4's USB console (-u: the CH343, about a minute a frame); the Nano must be running passthru_top."""
+Talks to the P4's USB console (-u: the CH343, about a minute a frame; --keep: the decoder is already running); the Nano must be running passthru_top."""
 import base64
 import pathlib
 import sys
@@ -32,10 +32,11 @@ def packed420_to_rgb(data, width, height):
 
 
 def main():
-    args = [a for a in sys.argv[1:] if a != "-u"]
+    args = [a for a in sys.argv[1:] if not a.startswith("-")]
     channel = args[0] if args else "R4"
     s = open_console(uart="-u" in sys.argv)
-    cmd(s, f"decode on {channel}", wait=40)
+    if "--keep" not in sys.argv:
+        cmd(s, f"decode on {channel}", wait=40)
     time.sleep(1)
     cmd(s, "decode")
     s.write(b"video raw\r")

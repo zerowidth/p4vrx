@@ -1,0 +1,6 @@
+# Copy to mise.local.toml (git-ignored) and fill in this setup's USB serial numbers, so rake and tools/ only
+# ever open these boards when another P4 or Nano is plugged in. `rake ports` lists them.
+[env]
+P4VRX_P4_UART_SERIAL = ""   # the P4 board's CH343 USB-C (1a86:55d3)
+P4VRX_P4_USB_SERIAL = ""    # the P4's high-speed USB: the firmware's console (303a:8000) and ROM loader (303a:0012)
+P4VRX_NANO_SERIAL = ""      # the Nano's BL616 (0403:6010)

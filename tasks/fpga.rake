@@ -15,8 +15,18 @@ def fpga_tool(name)
 end
 
 # openFPGALoader sometimes hangs at "Erase SRAM"; reconfiguring the FPGA from flash (-r) clears it.
+# The Nano by its BL616's serial when P4VRX_NANO_SERIAL is set; with several and none pinned, refuse.
+def nano_args
+  pin = pin_env("P4VRX_NANO_SERIAL")
+  return ["--ftdi-serial", pin] if pin && !pin.empty?
+
+  serials = usb_ports.select { |_, i, _| i == "0403:6010" }.map(&:last).uniq
+  abort "several Nanos (serials #{serials.join(", ")}); set P4VRX_NANO_SERIAL in mise.local.toml" if serials.size > 1
+  []
+end
+
 def fpga_loader_once(args, seconds)
-  cmd = [fpga_tool("openFPGALoader"), "-b", "tangnano20k", *args]
+  cmd = [fpga_tool("openFPGALoader"), "-b", "tangnano20k", *nano_args, *args]
   puts cmd.join(" ")
   pid = Process.spawn(*cmd)
   deadline = Time.now + seconds
@@ -73,6 +83,6 @@ namespace :fpga do
 
   desc "List the cables and FPGA openFPGALoader sees on the Nano"
   task :detect do
-    sh fpga_tool("openFPGALoader"), "--detect", "-b", "tangnano20k"
+    sh fpga_tool("openFPGALoader"), "--detect", "-b", "tangnano20k", *nano_args
   end
 end

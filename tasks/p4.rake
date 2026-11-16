@@ -14,10 +14,14 @@ def p4_rom_port
   return nil if ENV["PORT"]
 
   ports = usb_ports
-  rom = ports.find { |_, i| i == USB_IDS[:p4_rom] }
-  return rom.first if rom
+  roms = pinned_ports(ports, USB_IDS[:p4_rom])
+  consoles = pinned_ports(ports, USB_IDS[:p4_console])
+  if roms.size > 1 || consoles.size > 1
+    abort "several P4 high-speed ports; set P4VRX_P4_USB_SERIAL in mise.local.toml"
+  end
+  return roms.first.first if roms.first
 
-  console = ports.find { |_, i| i == USB_IDS[:p4_console] }
+  console = consoles.first
   return nil unless console
 
   script = <<~PY
