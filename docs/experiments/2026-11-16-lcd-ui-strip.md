@@ -22,6 +22,7 @@ Can the panel show the channel, frequency and a signal bar beside the picture at
 - PPA copy: 3.0-3.5 ms per buffer, with the panel at 59.8 fps, video at 59.9 fps, demodulation on core 1 at 59.8% and drawing on core 0 at 42.2%.
 - With the signal bar moved in tenths and a step-and-a-half hysteresis, the strip changed 28 times in the first 10 s (startup and lock) and then about once every 2 s.
 - The grab matches the simulator's strip: ![panel grab](img/2026-11-16-lcd-ui-strip.png)
+- The simulator page: ![simulator](img/2026-11-16-ui-sim.jpg)
 - The simulator rebuilds in 0.8 s after a change to `ui/src/ui.c`, and the page reloads itself. Tapping the channel stepped R4, R5, R6.
 
 ## Verdict

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>p4vrx UI simulator</title>
+<style>
+  :root { color-scheme: dark; --bg: #0e0f12; --panel: #17181c; --fg: #e8e8ea; --dim: #8a8d96; --line: #2a2c33; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; }
+  main { display: flex; flex-wrap: wrap; gap: 24px; padding: 24px; align-items: flex-start; }
+  .screen { padding: 14px; background: #000; border-radius: 14px; box-shadow: 0 0 0 1px var(--line); }
+  canvas { display: block; width: 800px; height: 480px; image-rendering: pixelated; cursor: pointer; touch-action: none; }
+  form { display: grid; gap: 14px; min-width: 260px; padding: 16px; background: var(--panel); border-radius: 10px; }
+  fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 6px; }
+  legend { color: var(--dim); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 4px; }
+  label { display: flex; gap: 8px; align-items: center; }
+  input[type=range] { flex: 1; }
+  output { min-width: 3ch; text-align: right; font-variant-numeric: tabular-nums; }
+  #log { color: var(--dim); font-size: 12px; min-height: 3em; white-space: pre-line; }
+</style>
+</head>
+<body>
+<main>
+  <div class="screen"><canvas id="panel" width="800" height="480"></canvas></div>
+  <form id="controls">
+    <fieldset>
+      <legend>Channel</legend>
+      <label>Band <select id="band"><option>R</option><option>A</option><option>B</option><option>E</option><option>F</option><option>L</option></select>
+        Number <select id="number"><option>1</option><option>2</option><option>3</option><option selected>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></label>
+      <label><input type="checkbox" id="decoding" checked> Decoding</label>
+    </fieldset>
+    <fieldset>
+      <legend>Signal</legend>
+      <label><input type="checkbox" id="locked" checked> Locked (off shows no signal)</label>
+      <label>Level <input type="range" id="level" min="0" max="70" value="37"><output id="level-out"></output></label>
+      <label>Sync noise <input type="range" id="noise" min="0" max="1000" step="10" value="130"><output id="noise-out"></output>&nbsp;kHz</label>
+    </fieldset>
+    <fieldset>
+      <legend>USB</legend>
+      <label><input type="radio" name="usb" value="0"> Not connected</label>
+      <label><input type="radio" name="usb" value="1" checked> Connected</label>
+      <label><input type="radio" name="usb" value="2"> Streaming</label>
+    </fieldset>
+    <div id="log"></div>
+  </form>
+</main>
+<video id="clip" src="clip.mp4" muted loop playsinline autoplay hidden></video>
+<script src="sim.js"></script>
+</body>
+</html>
