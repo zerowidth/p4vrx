@@ -1846,6 +1846,14 @@ static void status(void)
             abs(s_tnr), s_tnr_auto ? " (auto)" : "");
         s_noise_sq = s_noise_lines = 0;
     }
+    static uint32_t s_rate_nb;
+    static int64_t s_rate_us;
+    int64_t now = esp_timer_get_time();
+    uint32_t nb = s_nb;
+    if (s_rate_us && now > s_rate_us)
+        say("samples at %.1f ppm from %d Hz since last asked\n", ((double)(nb - s_rate_nb) * 1e6 / (now - s_rate_us) / FS_HZ - 1) * 1e6, (int)FS_HZ);
+    say("samples %lu at %lld us\n", (unsigned long)nb, (long long)now);
+    s_rate_nb = nb, s_rate_us = now;
     say("color %s, burst %d (on above %d), saturation %d%%, %lu lines with clicks since last asked%s\n", s_color ? "on" : "off", s_burst,
         COLOR_ON, s_saturation, (unsigned long)s_click_lines,
         s_clicks == CLICKS_HOLD ? ", drawn in the color above" : s_clicks == CLICKS_GRAY ? ", drawn without color" : "");

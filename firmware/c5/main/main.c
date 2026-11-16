@@ -7,7 +7,10 @@
 
 #include "driver/gpio.h"
 #include "driver/uart.h"
+#include "esp_clk_tree.h"
 #include "esp_err.h"
+#include "hal/misc.h"
+#include "soc/pcr_struct.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "hal/usb_serial_jtag_ll.h"
@@ -123,6 +126,21 @@ static void run_command(char *line)
         }
         if (err == ESP_OK) reply("ok antenna %s", antenna_name());
         else reply("err antenna %s not saved: %s", antenna_name(), esp_err_to_name(err));
+    } else if (strcmp(argv[0], "clk") == 0 && argc == 3 && strcmp(argv[1], "slip") != 0) {
+        PCR.parl_clk_tx_conf.parl_clk_tx_sel = atoi(argv[1]);
+        HAL_FORCE_MODIFY_U32_REG_FIELD(PCR.parl_clk_tx_conf, parl_clk_tx_div_num, atoi(argv[2]) - 1);
+        reply("ok clk parl_tx=%08lx", (unsigned long)PCR.parl_clk_tx_conf.val);
+    } else if (strcmp(argv[0], "drive") == 0 && argc == 3) {
+        int data = atoi(argv[1]), clk = atoi(argv[2]);
+        radio_set_drive(data, clk);
+        reply("ok drive %d %d", data, clk);
+    } else if (strcmp(argv[0], "clk") == 0 && argc == 1) {
+        uint32_t xtal = 0, f240 = 0, cpu = 0;
+        esp_clk_tree_src_get_freq_hz(SOC_MOD_CLK_XTAL, ESP_CLK_TREE_SRC_FREQ_PRECISION_EXACT, &xtal);
+        esp_clk_tree_src_get_freq_hz(SOC_MOD_CLK_PLL_F240M, ESP_CLK_TREE_SRC_FREQ_PRECISION_EXACT, &f240);
+        esp_clk_tree_src_get_freq_hz(SOC_MOD_CLK_CPU, ESP_CLK_TREE_SRC_FREQ_PRECISION_EXACT, &cpu);
+        reply("ok clk xtal=%lu f240=%lu cpu=%lu parl_tx=%08lx", (unsigned long)xtal, (unsigned long)f240, (unsigned long)cpu,
+              (unsigned long)PCR.parl_clk_tx_conf.val);
     } else if (strcmp(argv[0], "status") == 0) {
         int rssi = 0, noise = 0;
         bool have_rssi = radio_rssi(&rssi), have_noise = radio_noise_floor(&noise);

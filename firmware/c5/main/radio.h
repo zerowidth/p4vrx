@@ -23,3 +23,5 @@ bool radio_noise_floor(int *dbm);
 esp_err_t radio_iq_start(int every, int q_top, int i_top);
 void radio_iq_stop(void);
 void radio_clock_slip(uint32_t us);
+/* Pad drive strength, 0-3, for the data lanes and the clock. */
+void radio_set_drive(int data, int clock);

@@ -283,6 +283,19 @@ static esp_err_t start_clock(uint32_t hz)
     return parlio_tx_unit_transmit(s_clock, s_clock_pattern, CLOCK_PATTERN_BYTES * 8, &tx);
 }
 
+static gpio_drive_cap_t s_data_drive = GPIO_DRIVE_CAP_DEFAULT, s_clock_drive = GPIO_DRIVE_CAP_DEFAULT;
+
+static void apply_drive(void)
+{
+    for (int k = 0; k < LANE_COUNT; ++k) gpio_set_drive_capability(LANES[k].gpio, k == LANE_CLK ? s_clock_drive : s_data_drive);
+}
+
+void radio_set_drive(int data, int clock)
+{
+    s_data_drive = data, s_clock_drive = clock;
+    if (s_clock) apply_drive();
+}
+
 esp_err_t radio_iq_start(int every, int q_top, int i_top)
 {
     if (every < 2 || every > 16) return ESP_ERR_INVALID_ARG;
@@ -300,6 +313,7 @@ esp_err_t radio_iq_start(int every, int q_top, int i_top)
     }
     esp_err_t err = start_clock(BUS_HZ / every);
     if (err != ESP_OK) radio_iq_stop();
+    else apply_drive();
     return err;
 }
 

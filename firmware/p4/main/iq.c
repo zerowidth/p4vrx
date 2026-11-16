@@ -11,6 +11,7 @@
 #include "esp_private/gdma_link.h"
 #include "esp_cache.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 #include "esp_log.h"
 #include "esp_rom_gpio.h"
 #include "freertos/FreeRTOS.h"
@@ -98,11 +99,18 @@ void iq_bs_build_lut(uint16_t *lut, float dc_i, float dc_q)
     }
 }
 
+/* When the first and the filling partial receives arrived, to time the bus clock against the P4's. */
+static int64_t s_rate_t0, s_rate_t1;
+static size_t s_rate_b0, s_rate_b1;
+
 static bool IRAM_ATTR on_partial(parlio_rx_unit_handle_t rx, const parlio_rx_event_data_t *e, void *arg)
 {
     BaseType_t woken = pdFALSE;
     size_t before = s_got;
+    int64_t now = esp_timer_get_time();
+    if (!before) s_rate_t0 = now, s_rate_b0 = e->recv_bytes;
     s_got += e->recv_bytes;
+    if (before < s_want && s_got >= s_want) s_rate_t1 = now, s_rate_b1 = s_got;
     if (before < s_want && s_got >= s_want) xSemaphoreGiveFromISR(s_full, &woken);
     return woken == pdTRUE;
 }
@@ -662,6 +670,33 @@ static void counter_test(char side, int mhz, size_t samples)
     c5_request("link off", reply, sizeof reply, 1000);
 }
 
+/* Times a capture to measure the bus clock with the C5 sending the given diagnostic lanes, or its link counter. */
+static void rate_test(int argc, char **argv)
+{
+    char cmd[32], reply[96];
+    if (argc > 2 && strcmp(argv[2], "link") == 0) snprintf(cmd, sizeof cmd, "link q 13");
+    else snprintf(cmd, sizeof cmd, "iq on 6 %s %s", argc > 3 ? argv[2] : "9", argc > 3 ? argv[3] : "19");
+    if (!c5_request(cmd, reply, sizeof reply, 2000)) {
+        say("iq: %s: %s\n", cmd, reply);
+        return;
+    }
+    bus_enable(true);
+    s_every = 6;
+    vTaskDelay(pdMS_TO_TICKS(20));
+    int places = argc > 4 ? atoi(argv[4]) : 3;
+    for (int k = 0; k < places; ++k) {
+        if (k && places > 3 && !c5_request("clk slip 1", reply, sizeof reply, 2000)) say("iq: slip: %s\n", reply);
+        if (capture(s_psram, CAPTURE_SAMPLES, s_edge) != ESP_OK) {
+            say("iq: capture failed\n");
+            break;
+        }
+        double hz = (double)(s_rate_b1 - s_rate_b0) / 2 * 1e6 / (double)(s_rate_t1 - s_rate_t0);
+        say("%s: place %d, bus clock %.6f MHz, %+.0f ppm from 80/6, spikes %.2f\n", cmd, k, hz / 1e6, (hz / (80e6 / 6) - 1) * 1e6,
+            (double)phase_spikes(200000));
+    }
+    if (strcmp(cmd, "link q 13") == 0) c5_request("link off", reply, sizeof reply, 1000);
+}
+
 void iq_command(int argc, char **argv)
 {
     if (!prepare()) return;
@@ -677,6 +712,8 @@ void iq_command(int argc, char **argv)
         bus_enable(true);
         if (capture(s_psram, GAIN_SAMPLES, s_edge) == ESP_OK) say("spikes %.2f\n", (double)phase_spikes(GAIN_SAMPLES));
         else say("iq: capture failed\n");
+    } else if (strcmp(sub, "rate") == 0) {
+        rate_test(argc, argv);
     } else if (strcmp(sub, "counter") == 0) {
         counter_test(argc > 2 && argv[2][0] == 'i' ? 'i' : 'q', argc > 3 ? atoi(argv[3]) : 13,
                      argc > 4 ? strtoul(argv[4], NULL, 0) : GAIN_SAMPLES + 262144);
@@ -689,8 +726,13 @@ void iq_command(int argc, char **argv)
         size_t n = atoi(sub) > 0 && atoi(sub) <= MAX_SAMPLES ? atoi(sub) : CAPTURE_SAMPLES;
         bus_enable(true);
         esp_err_t err = capture(s_psram, n, s_edge);
-        if (err == ESP_OK) stats();
-        else say("iq: capture failed, %s\n", esp_err_to_name(err));
+        if (err == ESP_OK) {
+            stats();
+            double hz = (double)(s_rate_b1 - s_rate_b0) / 2 * 1e6 / (double)(s_rate_t1 - s_rate_t0);
+            say("bus clock %.6f MHz, %+.0f ppm from 80/%d\n", hz / 1e6, (hz / (80e6 / s_every) - 1) * 1e6, s_every);
+        } else {
+            say("iq: capture failed, %s\n", esp_err_to_name(err));
+        }
     } else {
         say("iq [samples] | start [channel [every]] | edge | spikes | pll on|off | counter q|i [MHz [samples]] | dump\n");
     }
