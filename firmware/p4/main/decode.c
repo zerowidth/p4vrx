@@ -383,6 +383,8 @@ static float bb_scale(int from, int to)
 
 /* The gain s_bs_dc was found at. */
 static int s_dc_gain;
+/* Set by `decode dc I Q`: the table stays centred there and the offset tracking stops. */
+static bool s_dc_hold;
 
 /* Hands the decode task a table centred on s_bs_dc, to load ahead of the vertical interval. */
 static void rebuild_table(void)
@@ -478,7 +480,7 @@ static void control(void)
         /* A step this large is a signal arriving or leaving, and the offset is found afresh. */
         if (abs(s_gain - gain) >= GAIN_STEP_MOST) s_dc_fast = DC_FAST_PASSES;
     }
-    if (s_bs_pending) return;
+    if (s_bs_pending || s_dc_hold) return;
 
     if (s_gain != s_dc_gain && follow_gain()) return;
     if (s_rms < 4) {
@@ -1916,6 +1918,40 @@ static bool start_on(const char *channel, bool force)
     return true;
 }
 
+/* The decoder's own sync-tip noise over ms, in kHz rms, or -1 without enough locked lines. */
+static int tip_noise_khz(uint32_t ms)
+{
+    s_noise_sq = 0;
+    s_noise_lines = 0;
+    vTaskDelay(pdMS_TO_TICKS(ms));
+    if (s_noise_lines < 100) return -1;
+    float var = (float)s_noise_sq / ((float)s_noise_lines * (TIP_END - TIP_START) * (TIP_END - TIP_START - 1));
+    return (int)lrintf(sqrtf(var) * FS_HZ / 256000);
+}
+
+/* Slips the C5's clock while decoding until the sync-tip noise is near the lowest seen. The capture-side
+ * placement in iq_start picks a clean-looking place, but decodes from it still split into 150-400 kHz and
+ * 900-1000 kHz sessions, and the decoder's own noise tells them apart. */
+static void place_by_noise(void)
+{
+    enum { TRIES = 24 };
+    int best = INT32_MAX, seen[TRIES], n = 0;
+    char reply[64];
+    vTaskDelay(pdMS_TO_TICKS(500));
+    for (; n < TRIES; ++n) {
+        int noise = tip_noise_khz(600);
+        seen[n] = noise;
+        if (noise >= 0 && noise < best) best = noise;
+        if (n >= 3 && noise >= 0 && noise <= best + best / 6 + 20) break;
+        /* A lost reply usually means a late one, and the slip happened; the next reading says. */
+        c5_request("clk slip 1", reply, sizeof reply, 2000);
+        vTaskDelay(pdMS_TO_TICKS(300));
+    }
+    say("sync tip noise by clock place (kHz):");
+    for (int k = 0; k <= n && k < TRIES; ++k) say(" %d", seen[k]);
+    say("\n");
+}
+
 bool decode_start(const char *channel)
 {
     /* The C5 streams I/Q across a retune and the gain loop follows the new signal, so no restart is needed. */
@@ -2012,9 +2048,18 @@ void decode_command(int argc, char **argv)
 {
     const char *sub = argc > 1 ? argv[1] : "";
     if (strcmp(sub, "on") == 0) {
-        decode_start(argc > 2 ? argv[2] : NULL);
+        if (decode_start(argc > 2 ? argv[2] : NULL)) place_by_noise();
+    } else if (strcmp(sub, "place") == 0) {
+        place_by_noise();
     } else if (strcmp(sub, "off") == 0) {
         decode_stop();
+    } else if (strcmp(sub, "dc") == 0 && argc > 2) {
+        s_dc_hold = strcmp(argv[2], "auto") != 0 && argc > 3;
+        if (s_dc_hold) {
+            s_bs_dc_i = strtof(argv[2], NULL);
+            s_bs_dc_q = strtof(argv[3], NULL);
+            rebuild_table();
+        }
     } else if (strcmp(sub, "gain") == 0 && argc > 2) {
         s_agc = strcmp(argv[2], "auto") == 0;
         if (!s_agc) set_gain(atoi(argv[2]));
@@ -2035,6 +2080,6 @@ void decode_command(int argc, char **argv)
     } else if (strcmp(sub, "") == 0) {
         status();
     } else {
-        say("decode [on [channel] | off | gain auto|N | sat PERCENT | luma plain|soft|peak | clicks hold|gray|off | wraps fix|off | tnr auto|LEVELS [SIXTEENTHS] | bench]\n");
+        say("decode [on [channel] | off | place | dc I Q|auto | gain auto|N | sat PERCENT | luma plain|soft|peak | clicks hold|gray|off | wraps fix|off | tnr auto|LEVELS [SIXTEENTHS] | bench]\n");
     }
 }

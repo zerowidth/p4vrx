@@ -373,6 +373,9 @@ static bool settle_gain(void)
 #define RING_MIN 600
 
 static int s_dc[2];
+/* With the Nano's resampling bitstream the C5's clock place doesn't matter, and its PLL wants the 1 in 6 clock
+ * throughout, so iq_start skips the 40 MS/s probe and both placements. */
+static bool s_pll;
 
 /* Captures on the rising edge and reports whether it reads the lanes clean. The Nano re-registers the bus, so
  * the P4's falling edge falls on its output's changes; what a capture judges is where the Nano's register
@@ -573,6 +576,12 @@ bool iq_start(const char *channel, int every)
     if (!prepare()) return false;
     decode_stop();
     bus_enable(true);
+    if (s_pll) {
+        s_edge = PARLIO_SAMPLE_EDGE_POS;
+        if (!start_c5(channel, every) || !set_probe_gain(s_probe_gain) || !settle_gain()) return false;
+        s_dc[0] = s_dc[1] = 0;
+        return true;
+    }
     if (!start_c5(channel, PROBE_EVERY) || !set_probe_gain(s_probe_gain) || !settle_gain() || !place_clock()) return false;
     if (every == PROBE_EVERY) return true;
     /* The clock keeps its place against the bus across a change of rate. */
@@ -661,6 +670,13 @@ void iq_command(int argc, char **argv)
     if (strcmp(sub, "dump") != 0) decode_stop();
     if (strcmp(sub, "start") == 0) {
         iq_start(argc > 2 ? argv[2] : "R4", argc > 3 ? atoi(argv[3]) : 2);
+    } else if (strcmp(sub, "pll") == 0 && argc > 2) {
+        s_pll = strcmp(argv[2], "on") == 0;
+        say("ok\n");
+    } else if (strcmp(sub, "spikes") == 0) {
+        bus_enable(true);
+        if (capture(s_psram, GAIN_SAMPLES, s_edge) == ESP_OK) say("spikes %.2f\n", (double)phase_spikes(GAIN_SAMPLES));
+        else say("iq: capture failed\n");
     } else if (strcmp(sub, "counter") == 0) {
         counter_test(argc > 2 && argv[2][0] == 'i' ? 'i' : 'q', argc > 3 ? atoi(argv[3]) : 13,
                      argc > 4 ? strtoul(argv[4], NULL, 0) : GAIN_SAMPLES + 262144);
@@ -676,6 +692,6 @@ void iq_command(int argc, char **argv)
         if (err == ESP_OK) stats();
         else say("iq: capture failed, %s\n", esp_err_to_name(err));
     } else {
-        say("iq [samples] | start [channel [every]] | edge | counter q|i [MHz [samples]] | dump\n");
+        say("iq [samples] | start [channel [every]] | edge | spikes | pll on|off | counter q|i [MHz [samples]] | dump\n");
     }
 }
