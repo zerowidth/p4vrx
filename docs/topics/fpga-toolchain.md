@@ -30,6 +30,7 @@ First build (2026-11-15): 35/384 IOB, 27 LUT4, 26 ALU, 25 DFF; 439 MHz max on th
 ## Other tops
 
 - `pintest_top` reads every wired pin and drives P4-facing pins on command, over the BL616 UART (pins 69/70), for `rake pins:check`.
+- The Nano's flash holds `passthru_lockout_top` (written 2026-11-16, verified). It is safe at power-up: it drives the P4 bus only while the P4 holds IRQ high, and with IRQ low its P4 pins float (checked with `pins float` after reconfiguring from flash). During configuration, before any bitstream runs, the pins have Gowin's weak pull-ups. `safe_top` remains the fallback image.
 - `passthru_lockout_top` is `passthru_top` with spurious C5 clock edges locked out, timed by a 135 MHz PLL from the 27 MHz oscillator. Use it rather than `passthru_top`. Its P4 pins have `PULL_MODE=NONE`, so with the bus off (IRQ low) they float like `safe_top`'s; Gowin's default pull-up otherwise holds them high. `pins float` on the P4 checks it. PCLK reads low under every bitstream, from the P4 side.
 - `passthru_top` forwards the C5 lanes to the P4 bus, enabled by the P4 on the IRQ wire. Load it only after the P4 has booted.
 
