@@ -13,7 +13,9 @@ The USB console stalls after two to four replies: the P4 keeps receiving and run
 - Espressif's esp_tinyusb 2.4.0 wrapper (its own PHY setup, task on core 1, standard descriptors with a qualifier) stalls the same way.
 - p4usb itself, rebuilt for rev v3, doesn't enumerate on this board at all.
 
-What stays in common is the console code, the Mac and the USB 2.1 hub. Next: plug the P4's high-speed port straight into the Mac, then try a bare TinyUSB CDC echo example. Until then, scripted work uses the CH343, whose auto-reset circuit restarts the P4 when the port opens.
+- Espressif's untouched `tusb_serial_device` example stalls the same way after one echo; CherryUSB's example doesn't enumerate.
+
+So it is outside our firmware: the cable, the USB 2.1 hub or the Mac. Next: the P4's high-speed port straight into the Mac with another cable. Until then, scripted work uses the CH343, whose auto-reset circuit restarts the P4 when the port opens.
 
 ## C5 control and the esptool bridge
 
@@ -30,6 +32,12 @@ GPIO 39-48 (D2..D0 among them) run from the P4's LDO channel 4, the board's SD c
 The Nano's `passthru_top` registers the C5's 14 lanes on its sample clock and drives them, with the inverted clock as PCLK, onto D13..D0 (Q7..Q1, I7..I1). It drives the bus only while the P4 holds the IRQ wire high (`pins bus on`), so a P4 in reset or before its LDO 4 is up sees high-Z.
 
 `iq cap [samples] [pos|neg]` captures up to 1.6M samples into PSRAM through PARLIO RX (sample on the rising edge) and prints levels and per-lane toggle rates; `iq dump` sends them as base64. `still` decodes one NTSC field of a 1.4M-sample capture to 320x240 grey. `tools/iqcap.py` and `tools/still.py` run the whole sequence over the CH343 and save to `captures/` ([first frame](../experiments/2026-11-15-r4-first-frame.md)).
+
+## Real-time decoder
+
+`decode on [channel]` is p4usb's decoder: `iq_start` probes at 40 MS/s (gain, then slipping the C5's clock until the rising-edge capture is clean, since the Nano re-registers the bus), then runs at 1 in 6 (13.33 MS/s) with the BitScrambler phase lookup. It fills 720x480 packed 4:2:0 frames at 60 fps; `video` shows the rate and `video grab` sends the newest frame, which `tools/grab.py` saves as PNG ([experiment](../experiments/2026-11-15-realtime-decoder.md)).
+
+While the Nano drives the bus, the UART to the C5 loses characters, so `c5_request` turns the bus off for each exchange.
 
 ## Tasks
 
