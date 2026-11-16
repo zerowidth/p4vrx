@@ -108,6 +108,22 @@ void pins_command(int argc, char **argv)
         say("pins");
         for (size_t i = 0; i < N_PINS; ++i) say(" %s=%d", s_pins[i].name, gpio_get_level(s_pins[i].pin));
         say("\n");
+    } else if (strcmp(sub, "float") == 0) {
+        /* A pin that follows both pulls is undriven; PCLK and the 14 lanes, the ones the bitstream drives. */
+        int driven = 0;
+        say("bus pins following the pulls (undriven):");
+        for (int i = 0; i < 15; ++i) {
+            const nano_pin_t *p = &s_pins[i];
+            gpio_set_pull_mode(p->pin, GPIO_PULLUP_ONLY);
+            vTaskDelay(pdMS_TO_TICKS(2));
+            int up = gpio_get_level(p->pin);
+            gpio_set_pull_mode(p->pin, GPIO_PULLDOWN_ONLY);
+            vTaskDelay(pdMS_TO_TICKS(2));
+            int down = gpio_get_level(p->pin);
+            if (up == 1 && down == 0) say(" %s", p->name);
+            else ++driven, say(" [%s driven %d]", p->name, down);
+        }
+        say("\n%d of 15 driven\n", driven);
     } else if (strcmp(sub, "release") == 0) {
         pins_init();
         say("ok\n");

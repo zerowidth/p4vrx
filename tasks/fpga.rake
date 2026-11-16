@@ -78,7 +78,7 @@ namespace :fpga do
 
   desc "Write #{FPGA_BITSTREAM} to the Nano's flash (kept across power cycles)"
   task flash: :build do
-    fpga_loader "-f", FPGA_BITSTREAM, seconds: 300
+    fpga_loader "-f", "--verify", FPGA_BITSTREAM, seconds: 300
   end
 
   desc "List the cables and FPGA openFPGALoader sees on the Nano"
