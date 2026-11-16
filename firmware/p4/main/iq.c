@@ -465,7 +465,8 @@ static bool start_c5(const char *channel, int every)
     s_every = every;
     const char *steps[] = {cmd, iq_on};
     for (int i = 0; i < 2; ++i) {
-        if (!c5_request(steps[i], reply, sizeof reply, 5000)) {
+        /* The first tune after a reset starts the radio, which has taken over 5 s. */
+        if (!c5_request(steps[i], reply, sizeof reply, 10000)) {
             say("iq: %s: %s\n", steps[i], reply);
             return false;
         }
@@ -494,6 +495,62 @@ bool iq_retune(const char *channel)
  * the 802.11p setting and two in three without. Running the clock a tick slow for a moment moves the edge
  * some ticks later, so this slips it until both of the P4's edges read clean. */
 #define SLIP_TRIES 16
+
+/* A slip's reply has come over half a second late. It is not retried: a late reply means the slip happened. */
+static bool slip(void)
+{
+    char reply[64];
+    return c5_request("clk slip 1", reply, sizeof reply, 2000);
+}
+
+/* Per thousand samples, how often the demodulated frequency jumps by over 1.5 rad a sample from one sample to
+ * the next. A sample whose I and Q come from different bus words keeps a round envelope but a wrong phase,
+ * and shows here: 1, 10 and 70 per thousand at the three clock places on the Nano path. */
+static float phase_spikes(size_t samples)
+{
+    double si = 0, sq = 0;
+    size_t n = samples - STALE;
+    for (size_t k = STALE; k < samples; ++k) {
+        si += (int8_t)s_buf[k];
+        sq += (int8_t)(s_buf[k] >> 8);
+    }
+    float mi = si / n, mq = sq / n, prev_phase = 0, prev_step = 0;
+    uint32_t spikes = 0;
+    for (size_t k = STALE; k < samples; ++k) {
+        float phase = atan2f((int8_t)(s_buf[k] >> 8) - mq, (int8_t)s_buf[k] - mi);
+        float step = phase - prev_phase;
+        step -= step > (float)M_PI ? 2 * (float)M_PI : step < -(float)M_PI ? -2 * (float)M_PI : 0;
+        float change = step - prev_step;
+        change -= change > (float)M_PI ? 2 * (float)M_PI : change < -(float)M_PI ? -2 * (float)M_PI : 0;
+        if (k > STALE + 1 && fabsf(change) > 1.5f) ++spikes;
+        prev_phase = phase;
+        prev_step = step;
+    }
+    return spikes * 1000.0f / n;
+}
+
+/* At 1 in `every` the clock takes one of three places against the bus's 80 MS/s words, and where it lands
+ * after the change of rate is not where the 40 MS/s probe left it. A slip moves it by a number of ticks that
+ * varies with the delay's jitter, so this measures until it has seen all three, then slips until one as good
+ * as the best comes round again. */
+static bool place_clock_at_rate(int every)
+{
+    float seen[12];
+    int n = 0;
+    float best = 1e9f;
+    for (; n < 12; ++n) {
+        if (capture(s_psram, GAIN_SAMPLES, s_edge) != ESP_OK) return false;
+        seen[n] = phase_spikes(GAIN_SAMPLES);
+        if (seen[n] < best) best = seen[n];
+        /* Past four looks, stop at the first that matches the best seen. */
+        if (n >= 4 && seen[n] <= best * 1.3f + 0.3f) break;
+        if (!slip()) return false;
+    }
+    say("phase spikes per thousand at 1 in %d:", every);
+    for (int k = 0; k <= n && k < 12; ++k) say(" %.2f", (double)seen[k]);
+    say(", settled on %.2f\n", (double)seen[n < 12 ? n : 11]);
+    return true;
+}
 
 static bool place_clock(void)
 {
@@ -526,7 +583,7 @@ bool iq_start(const char *channel, int every)
         return false;
     }
     s_every = every;
-    return true;
+    return place_clock_at_rate(every);
 }
 
 int iq_gain(void)

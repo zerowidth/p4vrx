@@ -27,8 +27,9 @@ static SemaphoreHandle_t s_ready;
 static SemaphoreHandle_t s_reply;
 static SemaphoreHandle_t s_request;
 static char s_reply_line[96];
-/* Whether c5_request turns the Nano's bus off for each exchange, for wiring where the bus corrupts the UART. */
-static bool s_pause_bus = false;
+/* Whether c5_request turns the Nano's bus off for each exchange: even on twisted pairs, commands sent while
+ * the bus ran were lost often enough to fail the decoder's start. */
+static bool s_pause_bus = true;
 
 /* Level 1 releases the pin (high-Z); the C5's own pull-ups hold EN and BOOT high. */
 static void open_drain_released(int pin)

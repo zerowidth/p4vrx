@@ -68,6 +68,8 @@ static uint32_t s_bitrate = H264_BITRATE_DEFAULT;
 static uint32_t s_keyframes;
 static uint32_t s_convert_us;
 static volatile bool s_want_key;
+/* `video encode off` stops the encoder, to see what it costs the decoder. */
+static volatile bool s_encode = true;
 
 #define NOTIFY_TICK 1
 #define NOTIFY_FIELD 2
@@ -202,6 +204,7 @@ static void video_task(void *arg)
             continue;
         }
         int64_t t1 = esp_timer_get_time();
+        if (!s_encode) continue;
         encode(raw, field, seq, t0);
         int64_t t2 = esp_timer_get_time();
         s_render_us = t1 - t0;
@@ -381,6 +384,10 @@ void video_command(int argc, char **argv)
 {
     if (argc > 1 && strcmp(argv[1], "grab") == 0) {
         grab();
+        return;
+    }
+    if (argc > 2 && strcmp(argv[1], "encode") == 0) {
+        s_encode = strcmp(argv[2], "off") != 0;
         return;
     }
     if (argc > 1 && strcmp(argv[1], "raw") == 0) {
