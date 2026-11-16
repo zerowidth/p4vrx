@@ -19,7 +19,10 @@ Decoder lock and noise from `decode`, polled every 2 s for 45 min (`captures/soa
 
 - Grey shear: the decoder's line period could walk to +0.5% on false hits and, as p4usb does, kept it across a loss of lock, so every re-acquisition drifted out of the window again. Now it resets on loss and stays within 0.3%. A 45-minute soak never lost lock: 1,298 samples, 218 to 254 of 262 hsyncs, mean 252.8, no event; before, lock went within minutes and stayed gone.
 - Clock placement at the decode rate: at 1 in 6 the Nano's register samples the C5's bus at one of several places, measured as 1, 10 and 70 phase spikes per thousand samples, and the 40 MS/s probe's place did not carry over. `iq_start` now measures and slips until it finds the best: 5 of 6 starts lock with sync-tip noise 164-396 kHz, against 600-1030 kHz and frequent loss before.
-- Clicks over the soak: median 52 lines a field (p10 20, p90 58).
+- Clock placement by the decoder's own noise: even from a clean-looking capture place, decodes split into 150-400 kHz and 900-1000 kHz sessions. `decode on` now slips the clock while decoding until the sync-tip noise is near the lowest seen: 7 of 8 starts settled at 138-319 kHz (the 8th failed earlier in its start).
+- Clicks over the soak: median 52 lines a field (p10 20, p90 58); 43-68 after the noise-based placement.
+- The phase table's offset is not it: holding it anywhere from (0, 0) to (-8, 0) left clicks at 46-63 a field. The tracked offset wandered to (-37, -38) for under 1% of the soak.
+- A resampling bitstream (`passthru_pll_top`: a PLL at 6x the C5 clock sampling every lane at one of 16 phases) gave 1-5 phase spikes per thousand at every phase, no better than the best direct place; its PLL input is not on a dedicated clock pin and its lock flickers.
 - Against p4usb over 9 pairs of grabs: luma noise 2.9 against 2.3, chroma row jumps 13.5 against 3.9, saturation 36 against 16. The luma is close; the colour is not. Halving saturation halves the row jumps, so chroma is over-amplified, as if the burst reads weak.
 - Counter test (C5 `link`, 7-bit counter on one lane group, 327,679 samples): Q lanes count perfectly through the Nano at 13 and 40 MHz, so the clock path adds no edges. I lanes fail on the same edge (317,437 bad steps at 13 MHz) and pass when the Nano registers on the falling edge instead. I and Q reach the Nano with different timing against the C5 clock. For real I/Q the falling edge is worse (best 4.5 spikes per thousand against 0.9-1.8).
 - The camera's line period measured 0.2-0.7% long tonight against 0.0% earlier; the counter test rules out extra samples, so it is the camera.
@@ -27,11 +30,12 @@ Decoder lock and noise from `decode`, polled every 2 s for 45 min (`captures/soa
 
 ## Verdict
 
-Adopted: the line-period reset and clamp, and decode-rate clock placement; the grey shear is gone. Open: colour. The likely cause is I/Q skew at the Nano's register, which leaves no clock place clean for all 14 lanes and corrupts phase, which chroma feels first.
+Adopted: the line-period reset and clamp, and clock placement at the decode rate by the decoder's own noise; the grey shear is gone and starts are mostly good. Open: colour. After everything above, p4vrx still shows 2.3x p4usb's saturation and 3.6x its row-to-row chroma jumps with luma noise only 1.3x, unchanged by sync noise, offset, encoding or sampling phase. The rainbow sits on fine luma detail, which points at the chroma comb (two lines a pair, opposite subcarrier phase) not cancelling luma here, rather than at noise.
 
 ## Next
 
-- Resample in the Nano rather than on the C5's clock: lock a PLL to the C5 clock at 6x (80 MHz, the bus's own word rate), sample mid-word, and keep every sixth word. That takes the C5 clock's place out of it. Or per-lane input delays if apicula supports Gowin's IODELAY.
-- Compare the decoder's burst magnitude and phase spread with p4usb's on the same picture, if p4usb's console can be read.
+- Check the chroma comb's line pairing and the burst's line-to-line coherence in the decoder (dump per-line burst phase), against a raw capture analysed offline.
+- Compare the decoder's burst magnitude with p4usb's on the same picture, if p4usb's console can be read.
+- If sampling comes back into it: feed the PLL from a dedicated clock pin, or try Gowin's IODELAY per lane.
 
 ![p4vrx against p4usb, before and after](img/2026-11-16-p4vrx-vs-p4usb.jpg)
