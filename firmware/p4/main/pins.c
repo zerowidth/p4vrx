@@ -51,8 +51,16 @@ int bus_lane_gpio(int lane)
 }
 
 /* The Nano drives the bus only while the P4 holds the IRQ wire high. */
+static bool s_bus;
+
+bool bus_enabled(void)
+{
+    return s_bus;
+}
+
 void bus_enable(bool on)
 {
+    s_bus = on;
     const nano_pin_t *irq = find("IRQ");
     gpio_set_level(irq->pin, on);
     gpio_set_direction(irq->pin, on ? GPIO_MODE_INPUT_OUTPUT : GPIO_MODE_INPUT);

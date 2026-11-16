@@ -107,12 +107,10 @@ void c5_init(void)
 
 void c5_tx_attach(void)
 {
+    /* Push-pull: only called once c5rx or the ROM loader owns the C5's GPIO 12 as its UART RX. An open-drain
+     * line on the internal pull-up lost characters to the 40 MHz lanes beside it. */
     ESP_ERROR_CHECK(uart_set_pin(C5_UART, PIN_C5_TX, PIN_C5_RX, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
     gpio_pullup_en(PIN_C5_RX);
-    /* Open-drain, so a C5 that is already running its app can't fight the P4.
-     * gpio_set_direction would unroute the UART signal, so only flip the driver. */
-    gpio_od_enable(PIN_C5_TX);
-    gpio_set_pull_mode(PIN_C5_TX, GPIO_PULLUP_ONLY);
 }
 
 void c5_tx_detach(void)
@@ -138,9 +136,23 @@ bool c5_request(const char *cmd, char *reply, size_t reply_len, uint32_t timeout
     }
     xSemaphoreTake(s_request, portMAX_DELAY);
     xSemaphoreTake(s_reply, 0);
+    /* The UART to the C5 loses characters both ways while the Nano drives the bus, so the bus pauses for the
+     * whole exchange, a few milliseconds. */
+    bool bus = bus_enabled();
+    if (bus) bus_enable(false);
     uart_write_bytes(C5_UART, cmd, strlen(cmd));
     uart_write_bytes(C5_UART, "\n", 1);
-    bool got = xSemaphoreTake(s_reply, pdMS_TO_TICKS(timeout_ms)) == pdTRUE;
+    /* A reply that came after an earlier request gave up names that request's command; skip it. */
+    const char *name = strncmp(cmd, "ping", 4) == 0 ? "c5rx" : cmd;
+    size_t word = strcspn(name, " ");
+    TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(timeout_ms);
+    bool got = false;
+    while (!got && xSemaphoreTake(s_reply, deadline - xTaskGetTickCount()) == pdTRUE) {
+        got = strncmp(s_reply_line, "err", 3) == 0 ||
+              (strncmp(s_reply_line + 3, name, word) == 0 && (s_reply_line[3 + word] == ' ' || !s_reply_line[3 + word]));
+        if ((int32_t)(deadline - xTaskGetTickCount()) <= 0) break;
+    }
+    if (bus) bus_enable(true);
     strlcpy(reply, got ? s_reply_line : "err no reply", reply_len);
     xSemaphoreGive(s_request);
     return got && strncmp(reply, "ok", 2) == 0;

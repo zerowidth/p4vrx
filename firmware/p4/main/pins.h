@@ -13,3 +13,4 @@ void pins_command(int argc, char **argv);
 int bus_pclk_gpio(void);
 int bus_lane_gpio(int lane);
 void bus_enable(bool on);
+bool bus_enabled(void);
