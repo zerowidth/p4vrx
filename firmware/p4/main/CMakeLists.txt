@@ -1,4 +1,4 @@
-idf_component_register(SRCS "main.c" "console.c" "usb.c" "c5.c" "bridge.c" "pins.c" "iq.c"
+idf_component_register(SRCS "main.c" "console.c" "usb.c" "c5.c" "bridge.c" "pins.c" "iq.c" "still.c"
                        PRIV_REQUIRES esp_driver_gpio esp_driver_uart esp_driver_parlio esp_hal_dma esp_mm esp_timer esp_hw_support esp_app_format
                                      espressif__tinyusb)
 

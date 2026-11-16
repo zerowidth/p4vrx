@@ -20,6 +20,7 @@
 #include "bridge.h"
 #include "c5.h"
 #include "iq.h"
+#include "still.h"
 #include "pins.h"
 #include "usb.h"
 
@@ -69,6 +70,7 @@ static const command_t s_commands[] = {
     {"info", cmd_info, "firmware version, chip revision, uptime and bridge counters"},
     {"reboot", cmd_reboot, "restart the P4; reboot download enters its ROM loader"},
     {"iq", iq_command, "iq cap [samples] [pos|neg] captures the bus and prints levels and lane activity; dump sends it"},
+    {"still", still_command, "decodes one field of the last capture (iq cap 1400000) to 320x240 grey and sends it; inv flips sync polarity"},
     {"pins", pins_command, "pins read lists the Nano-facing pins (lanes pulled down); drive <name> <0|1>, release, or bus on|off"},
     {"c5", c5_command, "c5 hold keeps it in reset; c5 reset runs its app; c5 start also waits for c5rx; c5 boot resets it into its ROM loader; c5 pins reads EN, BOOT, RX and TX with pull-downs; c5 log on|off relays its UART; c5 send talks to c5rx"},
 };
