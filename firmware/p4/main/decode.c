@@ -2003,11 +2003,13 @@ static void bench(void)
         (unsigned long)(CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ * 1000000ull / FS_HZ));
 }
 
+/* A forced start decodes even when the clock probe failed, and then still wants the channel noted and the
+ * clock placed by noise. */
 static bool start_on(const char *channel, bool force)
 {
-    if (!start(channel, force)) return false;
-    strlcpy(s_channel, iq_channel(&s_mhz), sizeof s_channel);
-    return true;
+    bool probed = start(channel, force);
+    if (s_running) strlcpy(s_channel, iq_channel(&s_mhz), sizeof s_channel);
+    return probed || (force && s_running);
 }
 
 /* The decoder's own sync-tip noise over ms, in kHz rms, or -1 without enough locked lines. */
