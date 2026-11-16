@@ -1,4 +1,18 @@
 dependencies:
+  espressif/esp_h264:
+    component_hash: c32e94b137aef712b5a347bf0c29d59eecfbcdbf62a0b6848810c8ecbe363261
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.4'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    targets:
+    - esp32s3
+    - esp32s31
+    - esp32p4
+    version: 1.5.0
   espressif/tinyusb:
     component_hash: a40b7f67df6ac254a4afd96c6401cc56f2059ae747d6d7e66b568bca53ad0edc
     dependencies:
@@ -20,7 +34,8 @@ dependencies:
       type: idf
     version: 6.1.0
 direct_dependencies:
+- espressif/esp_h264
 - espressif/tinyusb
-manifest_hash: 95d4fea4dd46a901357b8b070cfe8193cec6097f6bd3d85a50f6195649532d99
+manifest_hash: 585b97da0873796a2c7e649700a5dc05a0d212fda3d796305a4b0f076995f760
 target: esp32p4
 version: 3.0.0

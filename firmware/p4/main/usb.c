@@ -4,6 +4,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "esp_mac.h"
 #include "esp_private/usb_phy.h"
@@ -11,11 +12,12 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "device/dcd.h"
 #include "tusb.h"
-#include "device/usbd_pvt.h"
 
 #include "bridge.h"
 #include "console.h"
+#include "video.h"
 
 #define USB_VID 0x303a
 /* Not the ROM loader's 0x0012 or USB-Serial/JTAG's 0x1001, so esptool resets it with DTR and RTS. */
@@ -23,13 +25,22 @@
 #define EP_CDC_NOTIF 0x81
 #define EP_CDC_OUT 0x02
 #define EP_CDC_IN 0x82
+#define UVC_CLOCK_HZ 27000000
+#define TERM_CAMERA 1
+#define TERM_OUTPUT 2
 /* A closed or stalled reader should cost the console a moment, not hang it; any progress restarts it. */
 #define WRITE_TIMEOUT_US (200 * 1000)
 
-enum { ITF_CDC, ITF_CDC_DATA, ITF_COUNT };
-enum { STR_LANG, STR_MANUFACTURER, STR_PRODUCT, STR_SERIAL, STR_CONSOLE };
+enum { ITF_CDC, ITF_CDC_DATA, ITF_VIDEO_CONTROL, ITF_VIDEO_STREAMING, ITF_COUNT };
+enum { STR_LANG, STR_MANUFACTURER, STR_PRODUCT, STR_SERIAL, STR_CONSOLE, STR_VIDEO };
 
-#define CONFIG_LEN (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN)
+#define FRAME_INTERVAL (10000000 / VIDEO_FPS)
+#define VIDEO_DESC_LEN                                                                                         \
+    (TUD_VIDEO_DESC_IAD_LEN + TUD_VIDEO_DESC_STD_VC_LEN + TUD_VIDEO_DESC_CS_VC_LEN + 1 +                       \
+     TUD_VIDEO_DESC_CAMERA_TERM_LEN + TUD_VIDEO_DESC_OUTPUT_TERM_LEN + TUD_VIDEO_DESC_STD_VS_LEN +            \
+     TUD_VIDEO_DESC_CS_VS_IN_LEN + 1 + TUD_VIDEO_DESC_CS_VS_FMT_FRAME_BASED_LEN +                             \
+     TUD_VIDEO_DESC_CS_VS_FRM_FRAME_BASED_CONT_LEN + TUD_VIDEO_DESC_CS_VS_COLOR_MATCHING_LEN + 7)
+#define CONFIG_LEN (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + VIDEO_DESC_LEN)
 
 static const tusb_desc_device_t s_device = {
     .bLength = sizeof(tusb_desc_device_t),
@@ -51,6 +62,23 @@ static const tusb_desc_device_t s_device = {
 static const uint8_t s_config[] = {
     TUD_CONFIG_DESCRIPTOR(1, ITF_COUNT, 0, CONFIG_LEN, 0, 500),
     TUD_CDC_DESCRIPTOR(ITF_CDC, STR_CONSOLE, EP_CDC_NOTIF, 8, EP_CDC_OUT, EP_CDC_IN, 512),
+    TUD_VIDEO_DESC_IAD(ITF_VIDEO_CONTROL, 2, STR_VIDEO),
+    TUD_VIDEO_DESC_STD_VC(ITF_VIDEO_CONTROL, 0, STR_VIDEO),
+    TUD_VIDEO_DESC_CS_VC(0x0150, TUD_VIDEO_DESC_CAMERA_TERM_LEN + TUD_VIDEO_DESC_OUTPUT_TERM_LEN, UVC_CLOCK_HZ,
+                         ITF_VIDEO_STREAMING),
+    TUD_VIDEO_DESC_CAMERA_TERM(TERM_CAMERA, 0, 0, 0, 0, 0, 0),
+    TUD_VIDEO_DESC_OUTPUT_TERM(TERM_OUTPUT, VIDEO_TT_STREAMING, 0, TERM_CAMERA, 0),
+    TUD_VIDEO_DESC_STD_VS(ITF_VIDEO_STREAMING, 0, 1, STR_VIDEO),
+    TUD_VIDEO_DESC_CS_VS_INPUT(1,
+                               TUD_VIDEO_DESC_CS_VS_FMT_FRAME_BASED_LEN + TUD_VIDEO_DESC_CS_VS_FRM_FRAME_BASED_CONT_LEN +
+                                   TUD_VIDEO_DESC_CS_VS_COLOR_MATCHING_LEN,
+                               USB_EP_VIDEO_IN, 0, TERM_OUTPUT, 0, 0, 0, 0),
+    TUD_VIDEO_DESC_CS_VS_FMT_FRAME_BASED(1, 1, TUD_VIDEO_GUID_H264, 16, 1, 0, 0, 0, 0, 1),
+    TUD_VIDEO_DESC_CS_VS_FRM_FRAME_BASED_CONT(1, 0, VIDEO_WIDTH, VIDEO_HEIGHT, 1000000, 20000000, FRAME_INTERVAL, 0,
+                                              FRAME_INTERVAL, FRAME_INTERVAL, FRAME_INTERVAL),
+    TUD_VIDEO_DESC_CS_VS_COLOR_MATCHING(VIDEO_COLOR_PRIMARIES_BT709, VIDEO_COLOR_XFER_CH_BT709,
+                                        VIDEO_COLOR_COEF_SMPTE170M),
+    TUD_VIDEO_DESC_EP_BULK(USB_EP_VIDEO_IN, 512, 1),
 };
 _Static_assert(sizeof s_config == CONFIG_LEN, "configuration descriptor length");
 
@@ -60,7 +88,32 @@ static const char *const s_strings[] = {
     [STR_PRODUCT] = "p4vrx Receiver",
     [STR_SERIAL] = s_serial,
     [STR_CONSOLE] = "p4vrx Console",
+    [STR_VIDEO] = "p4vrx",
 };
+
+/* The P4's high-speed DWC2 controller: each IN endpoint's DIEPCTL, whose USBAEP bit the core clears on bus reset. */
+#define DWC2_DIEPCTL(n) (*(volatile uint32_t *)(0x50000900 + 0x20 * (n)))
+#define DIEPCTL_USBAEP (1u << 15)
+
+bool __real_dcd_edpt_open(uint8_t rhport, tusb_desc_endpoint_t const *desc);
+void __real_dcd_edpt_close_all(uint8_t rhport);
+
+/* The video class reopens its bulk endpoint on every SET_INTERFACE and the DWC2 port has no close, so each
+ * reopen took another TX FIFO until allocation failed; reactivate an active IN endpoint in place instead. */
+bool __wrap_dcd_edpt_open(uint8_t rhport, tusb_desc_endpoint_t const *desc)
+{
+    uint8_t ep = desc->bEndpointAddress;
+    if (tu_edpt_dir(ep) == TUSB_DIR_IN && (DWC2_DIEPCTL(tu_edpt_number(ep)) & DIEPCTL_USBAEP))
+        return dcd_edpt_iso_activate(rhport, desc);
+    return __real_dcd_edpt_open(rhport, desc);
+}
+
+/* Closing all re-initializes the FIFOs, so every endpoint must allocate again. */
+void __wrap_dcd_edpt_close_all(uint8_t rhport)
+{
+    __real_dcd_edpt_close_all(rhport);
+    for (int n = 1; n < 16; ++n) DWC2_DIEPCTL(n) &= ~DIEPCTL_USBAEP;
+}
 
 static usb_phy_handle_t s_phy;
 static SemaphoreHandle_t s_rx_ready;
@@ -97,8 +150,7 @@ void tud_cdc_rx_cb(uint8_t itf)
     xSemaphoreGive(s_rx_ready);
 }
 
-/* esptool's reset holds RTS (EN) with DTR (IO0) released, then releases RTS with DTR held; the P4 answers
- * by rebooting into its own ROM loader. */
+/* esptool's reset holds RTS (EN) with DTR (IO0) released, then releases RTS with DTR held. */
 void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts)
 {
     static bool in_reset;
@@ -116,11 +168,10 @@ void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts)
 #define GINTMSK_SUSPEND (1u << 11)
 
 /* The controller reports a suspend after 3 ms of silence and the stack then waits for its resume interrupt,
- * which never comes when the host only paused, so the console stops reading and writing. A start of frame
- * proves the bus is running, and the stack resumes on one. */
+ * which never comes when the host only paused. Suspended, the console neither reads nor writes while the
+ * camera carries on. A start of frame proves the bus is running, and the stack resumes on one. */
 static bool s_awaiting_sof;
 static uint32_t s_false_suspends;
-static uint32_t s_rx_bytes, s_tx_bytes, s_tx_dropped;
 
 void tud_resume_cb(void)
 {
@@ -163,12 +214,14 @@ void usb_init(void)
 
 void usb_console_info(void)
 {
-    say("usb console: mounted %d, suspended %d, DTR %d, %lu false suspends, %lu bytes in, %lu out, %lu dropped, "
-        "%lu free to send, IN busy %d, OUT busy %d\n",
-        tud_mounted(), tud_suspended(), tud_cdc_connected(), (unsigned long)s_false_suspends,
-        (unsigned long)s_rx_bytes, (unsigned long)s_tx_bytes, (unsigned long)s_tx_dropped,
-        (unsigned long)tud_cdc_write_available(), usbd_edpt_busy(TUD_OPT_RHPORT, EP_CDC_IN),
-        usbd_edpt_busy(TUD_OPT_RHPORT, EP_CDC_OUT));
+    say("usb console: mounted %d, suspended %d, DTR %d, %lu bytes free to send, %lu false suspends\n", tud_mounted(),
+        tud_suspended(), tud_cdc_connected(), (unsigned long)tud_cdc_write_available(), (unsigned long)s_false_suspends);
+}
+
+void usb_command(int argc, char **argv)
+{
+    if (argc > 1 && strcmp(argv[1], "suspend") == 0) dcd_event_bus_signal(TUD_OPT_RHPORT, DCD_EVENT_SUSPEND, false);
+    usb_console_info();
 }
 
 bool usb_console_connected(void)
@@ -185,13 +238,9 @@ void usb_console_write(const void *data, size_t len)
         tud_cdc_write_flush();
         p += n;
         len -= n;
-        s_tx_bytes += n;
         if (n) deadline = esp_timer_get_time() + WRITE_TIMEOUT_US;
         if (len) {
-            if (esp_timer_get_time() > deadline) {
-                s_tx_dropped += len;
-                return;
-            }
+            if (esp_timer_get_time() > deadline) return;
             vTaskDelay(1);
         }
     }
@@ -200,7 +249,5 @@ void usb_console_write(const void *data, size_t len)
 size_t usb_console_read(uint8_t *buf, size_t len, uint32_t timeout_ms)
 {
     if (!tud_cdc_available()) xSemaphoreTake(s_rx_ready, pdMS_TO_TICKS(timeout_ms));
-    uint32_t n = tud_cdc_read(buf, len);
-    s_rx_bytes += n;
-    return n;
+    return tud_cdc_read(buf, len);
 }

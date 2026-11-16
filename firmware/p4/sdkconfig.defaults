@@ -18,3 +18,8 @@ CONFIG_SPIRAM_SPEED_200M=y
 
 # The decoder's per-sample loop needs optimized code.
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
+# The H.264 encoder writes its whole input back from the cache inside a critical section, which held
+# core 0 for about 5 ms per frame; in 32 KB chunks the decoder's drawing task gets in between.
+CONFIG_ESP_MM_CACHE_MSYNC_C2M_CHUNKED_OPS=y
+CONFIG_ESP_MM_CACHE_MSYNC_C2M_CHUNKED_OPS_MAX_LEN=0x8000

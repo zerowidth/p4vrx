@@ -9,6 +9,8 @@ build-*/
 managed_components/
 sdkconfig
 sdkconfig.old
+# macOS leaves numbered copies when a build rewrites sdkconfig
+sdkconfig [0-9]*
 
 # FPGA build output
 fpga/build/

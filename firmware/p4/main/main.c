@@ -8,6 +8,7 @@
 #include "console.h"
 #include "pins.h"
 #include "usb.h"
+#include "uvc.h"
 #include "video.h"
 
 void app_main(void)
@@ -17,8 +18,9 @@ void app_main(void)
     c5_init();
     pins_init();
     console_init();
-    usb_init();
     video_init();
+    uvc_init();
+    usb_init();
     say("\np4vrx ready, type help\n> ");
 
     uint8_t buf[64];
