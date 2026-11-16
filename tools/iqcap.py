@@ -1,5 +1,5 @@
-"""Capture I/Q from the C5 through the Nano pass-through and save it: iqcap.py [samples] [channel].
-Talks to the P4's CH343 console, which resets the P4, so it sets everything up in one session.
+"""Capture I/Q from the C5 through the Nano pass-through and save it: iqcap.py [samples] [channel] [every] [-u].
+Talks to the P4's USB console (-u: the CH343, which resets the P4 when opened).
 Writes captures/iq-<channel>-<time>.u16 (little-endian words: I low byte, Q high byte, each 2v+1)."""
 import base64
 import pathlib
@@ -21,10 +21,11 @@ def cmd(s, line, wait=6.0):
 
 
 def main():
-    samples = int(sys.argv[1]) if len(sys.argv) > 1 else 131072
-    channel = sys.argv[2] if len(sys.argv) > 2 else "R4"
-    s = open_console(uart=True)
-    every = sys.argv[3] if len(sys.argv) > 3 else "2"
+    args = [a for a in sys.argv[1:] if a != "-u"]
+    samples = int(args[0]) if args else 131072
+    channel = args[1] if len(args) > 1 else "R4"
+    s = open_console(uart="-u" in sys.argv)
+    every = args[2] if len(args) > 2 else "2"
     cmd(s, f"iq start {channel} {every}", wait=30)
     cmd(s, f"iq {samples}", wait=10)
     s.write(b"iq dump\r")
