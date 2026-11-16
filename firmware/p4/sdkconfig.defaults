@@ -11,3 +11,7 @@ CONFIG_LOG_DEFAULT_LEVEL_WARN=y
 CONFIG_FREERTOS_HZ=1000
 # The console runs commands on the main task.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# I/Q captures live in the in-package PSRAM.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_SPEED_200M=y

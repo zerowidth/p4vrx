@@ -5,11 +5,9 @@
 #include <string.h>
 
 #include "driver/gpio.h"
-#include "esp_rom_gpio.h"
 #include "esp_timer.h"
-#include "soc/gpio_sig_map.h"
-#include "hal/uart_periph.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 
 #include "bridge.h"
@@ -23,6 +21,12 @@
 
 /* Off by default: unknown C5 firmware may drive GPIO 11 with anything. */
 static volatile bool s_log;
+/* Set once c5rx announces itself after a reset, so GPIO 12 is known to be its UART RX. */
+static volatile bool s_c5rx;
+static SemaphoreHandle_t s_ready;
+static SemaphoreHandle_t s_reply;
+static SemaphoreHandle_t s_request;
+static char s_reply_line[96];
 
 /* Level 1 releases the pin (high-Z); the C5's own pull-ups hold EN and BOOT high. */
 static void open_drain_released(int pin)
@@ -33,17 +37,31 @@ static void open_drain_released(int pin)
     gpio_set_direction(pin, GPIO_MODE_INPUT_OUTPUT_OD);
 }
 
-/* UART1 listens to the C5 only while a bridge session or the log needs it: firmware that drives GPIO 11
- * with something fast floods the UART with interrupts and starves the console. */
-static void rx_route(bool on)
+static void on_line(const char *line)
 {
-    if (on) {
-        ESP_ERROR_CHECK(uart_set_pin(C5_UART, UART_PIN_NO_CHANGE, PIN_C5_RX, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-    } else {
-        esp_rom_gpio_connect_in_signal(GPIO_MATRIX_CONST_ONE_INPUT,
-                                       UART_PERIPH_SIGNAL(C5_UART, SOC_UART_PERIPH_SIGNAL_RX), false);
+    if (strcmp(line, "c5rx ready") == 0) {
+        c5_tx_attach();
+        s_c5rx = true;
+        xSemaphoreGive(s_ready);
+    } else if (strncmp(line, "ok", 2) == 0 || strncmp(line, "err", 3) == 0) {
+        strlcpy(s_reply_line, line, sizeof s_reply_line);
+        xSemaphoreGive(s_reply);
     }
-    gpio_pullup_en(PIN_C5_RX);
+}
+
+static void split_lines(const uint8_t *buf, size_t n)
+{
+    static char line[96];
+    static size_t len;
+    for (size_t i = 0; i < n; ++i) {
+        if (buf[i] == '\n' || buf[i] == '\r') {
+            line[len] = '\0';
+            if (len > 0) on_line(line);
+            len = 0;
+        } else if (buf[i] >= 0x20 && buf[i] < 0x7f && len < sizeof line - 1) {
+            line[len++] = (char)buf[i];
+        }
+    }
 }
 
 static void relay_task(void *arg)
@@ -54,9 +72,10 @@ static void relay_task(void *arg)
         if (n == 0) continue;
         if (bridge_active()) {
             bridge_c5_bytes(buf, n);
-        } else if (s_log) {
-            host_write(buf, n);
+            continue;
         }
+        if (s_log) host_write(buf, n);
+        split_lines(buf, n);
     }
 }
 
@@ -77,9 +96,12 @@ void c5_init(void)
     };
     ESP_ERROR_CHECK(uart_driver_install(C5_UART, 4096, 0, 0, NULL, 0));
     ESP_ERROR_CHECK(uart_param_config(C5_UART, &cfg));
-    gpio_reset_pin(PIN_C5_RX);
-    gpio_set_direction(PIN_C5_RX, GPIO_MODE_INPUT);
-    rx_route(false);
+    ESP_ERROR_CHECK(uart_set_pin(C5_UART, UART_PIN_NO_CHANGE, PIN_C5_RX, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+    /* Keeps the line idle rather than floating while the C5 is in reset. */
+    gpio_pullup_en(PIN_C5_RX);
+    s_ready = xSemaphoreCreateBinary();
+    s_reply = xSemaphoreCreateBinary();
+    s_request = xSemaphoreCreateMutex();
     xTaskCreate(relay_task, "c5_relay", 3072, NULL, 5, NULL);
 }
 
@@ -95,10 +117,33 @@ void c5_tx_attach(void)
 
 void c5_tx_detach(void)
 {
-    if (!s_log) rx_route(false);
+    s_c5rx = false;
     gpio_reset_pin(PIN_C5_TX);
     gpio_set_direction(PIN_C5_TX, GPIO_MODE_INPUT);
     gpio_set_pull_mode(PIN_C5_TX, GPIO_FLOATING);
+}
+
+bool c5_run_c5rx(uint32_t timeout_ms)
+{
+    xSemaphoreTake(s_ready, 0);
+    c5_run();
+    return xSemaphoreTake(s_ready, pdMS_TO_TICKS(timeout_ms)) == pdTRUE;
+}
+
+bool c5_request(const char *cmd, char *reply, size_t reply_len, uint32_t timeout_ms)
+{
+    if (!s_c5rx) {
+        strlcpy(reply, "err c5rx not running", reply_len);
+        return false;
+    }
+    xSemaphoreTake(s_request, portMAX_DELAY);
+    xSemaphoreTake(s_reply, 0);
+    uart_write_bytes(C5_UART, cmd, strlen(cmd));
+    uart_write_bytes(C5_UART, "\n", 1);
+    bool got = xSemaphoreTake(s_reply, pdMS_TO_TICKS(timeout_ms)) == pdTRUE;
+    strlcpy(reply, got ? s_reply_line : "err no reply", reply_len);
+    xSemaphoreGive(s_request);
+    return got && strncmp(reply, "ok", 2) == 0;
 }
 
 void c5_hold(void)
@@ -157,6 +202,9 @@ void c5_command(int argc, char **argv)
         c5_hold();
     } else if (strcmp(sub, "reset") == 0) {
         c5_run();
+    } else if (strcmp(sub, "start") == 0) {
+        say(c5_run_c5rx(5000) ? "ok c5rx ready\n" : "err c5rx did not start\n");
+        return;
     } else if (strcmp(sub, "boot") == 0) {
         c5_download();
     } else if (strcmp(sub, "pins") == 0) {
@@ -164,9 +212,19 @@ void c5_command(int argc, char **argv)
         return;
     } else if (strcmp(sub, "log") == 0 && argc > 2) {
         s_log = strcmp(argv[2], "on") == 0;
-        rx_route(s_log || bridge_active());
+    } else if (strcmp(sub, "send") == 0 && argc > 2) {
+        char cmd[96] = "";
+        for (int i = 2; i < argc; ++i) {
+            if (i > 2) strlcat(cmd, " ", sizeof cmd);
+            strlcat(cmd, argv[i], sizeof cmd);
+        }
+        char reply[96];
+        /* Starting the radio takes about a second. */
+        c5_request(cmd, reply, sizeof reply, 5000);
+        say("%s\n", reply);
+        return;
     } else {
-        say("c5 hold | reset | boot | pins | log on|off\n");
+        say("c5 hold | reset | start | boot | pins | log on|off | send <command>\n");
         return;
     }
     say("ok\n");

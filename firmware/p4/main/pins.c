@@ -39,6 +39,25 @@ static const nano_pin_t *find(const char *name)
     return NULL;
 }
 
+/* The bus as the pass-through bitstream drives it: lane 0 is D13 (Q7) .. lane 13 is D0 (I1). */
+int bus_pclk_gpio(void)
+{
+    return s_pins[0].pin;
+}
+
+int bus_lane_gpio(int lane)
+{
+    return s_pins[1 + lane].pin;
+}
+
+/* The Nano drives the bus only while the P4 holds the IRQ wire high. */
+void bus_enable(bool on)
+{
+    const nano_pin_t *irq = find("IRQ");
+    gpio_set_level(irq->pin, on);
+    gpio_set_direction(irq->pin, on ? GPIO_MODE_INPUT_OUTPUT : GPIO_MODE_INPUT);
+}
+
 void pins_init(void)
 {
     /* GPIO 39-48 run from LDO channel 4, the board's SD card IO supply; without it their high is too low
@@ -62,6 +81,9 @@ void pins_command(int argc, char **argv)
     } else if (strcmp(sub, "release") == 0) {
         pins_init();
         say("ok\n");
+    } else if (strcmp(sub, "bus") == 0 && argc > 2) {
+        bus_enable(strcmp(argv[2], "on") == 0);
+        say("ok\n");
     } else if (strcmp(sub, "drive") == 0 && argc > 3) {
         const nano_pin_t *p = find(argv[2]);
         int level = atoi(argv[3]);
@@ -73,6 +95,6 @@ void pins_command(int argc, char **argv)
         gpio_set_direction(p->pin, p->i2c ? GPIO_MODE_INPUT_OUTPUT_OD : GPIO_MODE_INPUT_OUTPUT);
         say("ok\n");
     } else {
-        say("pins read | release | drive <name> <0|1>\n");
+        say("pins read | release | drive <name> <0|1> | bus on|off\n");
     }
 }
