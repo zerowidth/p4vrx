@@ -29,7 +29,7 @@ P4 console on the CH343P) stay unused.
 | 46 | D2 | Nano 54 | |
 | 47 | D1 | Nano 55 | |
 | 48 | D0 | Nano 56 | |
-| 52 | IRQ / frame valid | Nano 79 | Optional; Nano 79 is the WS2812 pin |
+| 52 | IRQ / frame valid | Nano 79 | Nano 79 is the WS2812 pin. For now the P4 drives it as the pass-through's bus enable |
 | 50 | C5 UART RX | C5 12 | Direct |
 | 51 | C5 UART TX | C5 11 | Direct |
 | 35 | C5 BOOT, open-drain | C5 28 (back pad) | P4 strapping pin, held high by the C5. Verify |

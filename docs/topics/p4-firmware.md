@@ -25,9 +25,15 @@ esptool on a console port with `--before no-reset` reaches the C5: the P4 sees e
 
 GPIO 39-48 (D2..D0 among them) run from the P4's LDO channel 4, the board's SD card IO supply. The firmware sets it to 3.3 V at boot. Nothing may drive those pins before that.
 
+## Capture and stills
+
+The Nano's `passthru_top` registers the C5's 14 lanes on its sample clock and drives them, with the inverted clock as PCLK, onto D13..D0 (Q7..Q1, I7..I1). It drives the bus only while the P4 holds the IRQ wire high (`pins bus on`), so a P4 in reset or before its LDO 4 is up sees high-Z.
+
+`iq cap [samples] [pos|neg]` captures up to 1.6M samples into PSRAM through PARLIO RX (sample on the rising edge) and prints levels and per-lane toggle rates; `iq dump` sends them as base64. `still` decodes one NTSC field of a 1.4M-sample capture to 320x240 grey. `tools/iqcap.py` and `tools/still.py` run the whole sequence over the CH343 and save to `captures/` ([first frame](../experiments/2026-11-15-r4-first-frame.md)).
+
 ## Tasks
 
 - `rake p4:flash` builds and flashes over the high-speed USB ROM loader (rebooting the firmware into it with DTR/RTS), or `PORT=<CH343 port>` flashes over the CH343.
 - `rake p4:console` opens the console in picocom.
-- `rake c5:chip_id` and `rake c5:pinwalk` run esptool through the bridge. Over the CH343, set `PORT` to its port and `BAUD=115200`.
+- `rake c5:flash`, `rake c5:chip_id` and `rake c5:pinwalk` run esptool through the bridge. Over the CH343, set `PORT` to its port and `BAUD=115200`.
 - `rake pins:check` runs the wiring check ([experiment](../experiments/2026-11-15-pin-mapping.md)).
