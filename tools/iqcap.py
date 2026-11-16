@@ -24,9 +24,9 @@ def main():
     samples = int(sys.argv[1]) if len(sys.argv) > 1 else 131072
     channel = sys.argv[2] if len(sys.argv) > 2 else "R4"
     s = open_console(uart=True)
-    for line in ("c5 start", f"c5 send tune {channel}", "c5 send iq on", "c5 send status", "pins bus on"):
-        cmd(s, line)
-    cmd(s, f"iq cap {samples}")
+    every = sys.argv[3] if len(sys.argv) > 3 else "2"
+    cmd(s, f"iq start {channel} {every}", wait=30)
+    cmd(s, f"iq {samples}", wait=10)
     s.write(b"iq dump\r")
     data, buf, end = [], b"", time.time() + samples / 2000 + 30
     while time.time() < end:

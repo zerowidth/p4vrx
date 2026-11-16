@@ -12,13 +12,14 @@ from iqcap import cmd  # noqa: E402
 from p4cmd import open_console  # noqa: E402
 
 
-def write_png(path, width, height, grey):
-    rows = b"".join(b"\0" + grey[y * width:(y + 1) * width] for y in range(height))
+def write_png(path, width, height, pixels, colour=False):
+    row = width * (3 if colour else 1)
+    rows = b"".join(b"\0" + pixels[y * row:(y + 1) * row] for y in range(height))
 
     def chunk(kind, data):
         return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
 
-    path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0))
+    path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2 if colour else 0, 0, 0, 0))
                      + chunk(b"IDAT", zlib.compress(rows, 9)) + chunk(b"IEND", b""))
 
 
@@ -26,9 +27,9 @@ def main():
     channel = sys.argv[1] if len(sys.argv) > 1 else "R4"
     inv = len(sys.argv) > 2 and sys.argv[2] == "inv"
     s = open_console(uart=True)
-    for line in ("c5 start", f"c5 send tune {channel}", "c5 send iq on", "pins bus on"):
+    for line in (f"iq start {channel}",):
         cmd(s, line)
-    cmd(s, "iq cap 1400000", wait=10)
+    cmd(s, "iq 1400000", wait=10)
     s.write(b"still inv\r" if inv else b"still\r")
     buf, end = b"", time.time() + 60
     while time.time() < end and b"still end" not in buf and b"err" not in buf[-200:]:
