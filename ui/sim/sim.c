@@ -12,13 +12,20 @@ EXPORT(sim_fb) uint16_t *sim_fb(void)
     return s_fb;
 }
 
-EXPORT(sim_set) void sim_set(int decoding, int locked, int level, int usb, int mhz)
+EXPORT(sim_set) void sim_set(int decoding, int locked, int level, int usb, int mhz, int hdzero)
 {
+    s_state.mode = hdzero ? UI_HDZERO : UI_ANALOG;
     s_state.decoding = decoding;
     s_state.locked = locked;
     s_state.level = level;
     s_state.usb = (ui_usb_t)usb;
     s_state.mhz = (uint16_t)mhz;
+}
+
+EXPORT(sim_set_hdzero) void sim_set_hdzero(int format, int link_quality)
+{
+    s_state.hdz_format = (ui_hdz_format_t)format;
+    s_state.link_quality = link_quality;
 }
 
 EXPORT(sim_set_channel) void sim_set_channel(int band, int number)

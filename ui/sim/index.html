@@ -30,6 +30,13 @@
       <label><input type="checkbox" id="decoding" checked> Decoding</label>
     </fieldset>
     <fieldset>
+      <legend>Mode</legend>
+      <label><input type="radio" name="mode" value="analog" checked> Analog</label>
+      <label><input type="radio" name="mode" value="hdzero" id="hdzero"> HDZero (theoretical: not decoded yet)</label>
+      <label>Format <select id="hdz-format"><option value="0">720p60</option><option value="1">540p90</option><option value="2">1080p30</option></select></label>
+      <label>Link quality <input type="range" id="lq" min="0" max="100" value="85"><output id="lq-out"></output>&nbsp;%</label>
+    </fieldset>
+    <fieldset>
       <legend>Signal</legend>
       <label><input type="checkbox" id="locked" checked> Locked (off shows no signal)</label>
       <label>Level <input type="range" id="level" min="0" max="70" value="37"><output id="level-out"></output></label>

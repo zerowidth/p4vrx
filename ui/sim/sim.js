@@ -30,8 +30,10 @@ async function start() {
   function push() {
     const usb = Number(document.querySelector("input[name=usb]:checked").value);
     ui.sim_set_channel($("band").value.charCodeAt(0), $("number").value.charCodeAt(0));
-    ui.sim_set($("decoding").checked, $("locked").checked, Number($("level").value), usb, ui.sim_channel_mhz());
+    ui.sim_set($("decoding").checked, $("locked").checked, Number($("level").value), usb, ui.sim_channel_mhz(), $("hdzero").checked);
+    ui.sim_set_hdzero(Number($("hdz-format").value), Number($("lq").value));
     $("level-out").textContent = $("level").value;
+    $("lq-out").textContent = $("lq").value;
     $("noise-out").textContent = $("noise").value;
   }
   $("controls").addEventListener("input", push);
@@ -57,7 +59,18 @@ async function start() {
   let frame = 0;
   function draw() {
     const locked = $("locked").checked && $("decoding").checked;
-    if (locked && clip.readyState >= 2) {
+    if (locked && clip.readyState >= 2 && $("hdzero").checked) {
+      // HDZero's 16:9 across the picture's width, letterboxed. No HDZero footage is decoded yet, so this is the
+      // analog clip cropped to 16:9; a digital link shows no analog noise.
+      const h = Math.round(PIC_W * 9 / 16), y = (H - h) / 2;
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, PIC_W, H);
+      const sh = clip.videoWidth * 9 / 16;
+      ctx.drawImage(clip, 0, (clip.videoHeight - sh) / 2, clip.videoWidth, sh, 0, y, PIC_W, h);
+      ctx.fillStyle = "#8a8d96";
+      ctx.font = "12px system-ui";
+      ctx.fillText("placeholder: analog clip cropped to 16:9", 12, y + h + 18);
+    } else if (locked && clip.readyState >= 2) {
       ctx.drawImage(clip, 0, 0, PIC_W, H);
       const kHz = Number($("noise").value);
       ctx.globalAlpha = Math.min(0.85, Math.max(0, (kHz - 100) / 1100));

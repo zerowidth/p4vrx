@@ -9,7 +9,7 @@ The UI lives in `ui/`, apart from the firmware, so it runs both on the P4 and in
 
 ## Simulator
 
-`rake ui:dev` builds `ui/build/ui.wasm` and serves http://127.0.0.1:8790/ (`PORT=` to change it). It rebuilds in under a second when a file under `ui/` changes, and the page reloads itself. The page has controls for the channel, decoding, lock, signal level, sync noise and USB state. Mouse presses on the panel are touches.
+`rake ui:dev` builds `ui/build/ui.wasm` and serves http://127.0.0.1:8790/ (`PORT=` to change it). It rebuilds in under a second when a file under `ui/` changes, and the page reloads itself. The page has controls for the channel, decoding, lock, signal level, sync noise and USB state, and a mode: analog, or HDZero, which is theoretical until the receiver decodes it. In HDZero mode the picture is 16:9 letterboxed in the 630x480 area (the analog clip cropped, as no HDZero footage is decoded yet), the strip shows the format (720p60, 540p90 or 1080p30) and a link-quality bar, and a tap steps through HDZero's channels (R1-R8, F2, F4). The P4 always reports analog. Mouse presses on the panel are touches.
 
 The build uses Xcode's clang (`/usr/bin/clang --target=wasm32`) and, as the linker, `rust-lld -flavor wasm` from the active rustup toolchain. The README says how to install both.
 
