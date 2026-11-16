@@ -6,7 +6,7 @@
 
 The same line console answers on the high-speed USB (CDC, 303a:8000) and on UART0 through the CH343 (1a86:55d3). Replies go where the last input came from. Commands: `help`, `info`, `reboot [download]`, `pins`, `c5`.
 
-The high-speed USB console works once header pins 23/25 (the high-speed pair, also on the header) don't continue down the ribbon: with the header disconnected it passed 360 commands and 200 back-to-back replies (342 KB) with nothing dropped. Before that, ribbon stubs on the pair made it stall after a few replies, and changing TinyUSB, DMA mode, task cores or Espressif's own examples didn't help ([wiring.md](../wiring.md)).
+The high-speed USB console works once header pins 25/27 (the high-speed pair, also on the header) don't continue down the ribbon: with the header disconnected it passed 360 commands and 200 back-to-back replies (342 KB) with nothing dropped. Before that, ribbon stubs on the pair made it stall after a few replies, and changing TinyUSB, DMA mode, task cores or Espressif's own examples didn't help ([wiring.md](../wiring.md)).
 
 ## C5 control and the esptool bridge
 
