@@ -9,35 +9,35 @@ GPIOs. Go by the P4's silkscreen, not the breakout's Raspberry Pi labels.
 
 ## P4 header
 
-All 20 usable GPIOs are assigned. 24/25 (the full-speed USB pair on header pins 21/23) and 37/38 (the
+All 20 usable GPIOs are assigned. 24/25 (the full-speed USB pair, Pi pins 22/24, J3 21/23) and 37/38 (the
 P4 console on the CH343P) stay unused.
 
-Header pins 25 and 27 are USBD_N and USBD_P, the high-speed USB pair that also goes to the board's USB-C port. They must stop at the P4: carried down the ribbon and breakout, the stubs broke the 480 Mbit/s link, which stalled after a few replies or never enumerated. Leave those two ribbon conductors unconnected (pull the pins from the gender changer or cut the conductors). The PCB must not route them anywhere.
+Pi pins 26 and 28 (J3 25 and 27) are USBD_N and USBD_P, the high-speed USB pair that also goes to the board's USB-C port. They must stop at the P4: carried down the ribbon and breakout, the stubs broke the 480 Mbit/s link, which stalled after a few replies or never enumerated. Leave those two ribbon conductors unconnected (pull the pins from the gender changer or cut the conductors). The PCB must not route them anywhere.
 
-The header (J3 in Waveshare's schematic) is not the Raspberry Pi layout, whatever the breakout's silkscreen says. Its eight grounds are pins 5, 10, 13, 19, 26, 29, 33 and 40; 3V3 is on 2 and 18, 5V on 1 and 3.
+Waveshare's schematic (J3) numbers the header's columns opposite to the Raspberry Pi convention: each odd/even pair is swapped, so J3 pin n is Pi pin n+1 for odd n and n-1 for even n. In Pi numbering, which the breakout's silkscreen uses, the power pins sit where a Pi has them: GND on 6, 9, 14, 20, 25, 30, 34, 39, 3V3 on 1 and 17, 5V on 2 and 4. The mapping is checked physically only through the pin check (every GPIO below drives and reads at its far end) and the USB fix; the ground positions are pending a continuity check.
 
-| Pins | Odd | Even |
-| --- | --- | --- |
-| 1, 2 | 5V | 3V3 |
-| 3, 4 | 5V | GPIO 7 (I2C SDA) |
-| 5, 6 | GND | GPIO 8 (I2C SCL) |
-| 7, 8 | GPIO 37 (console TX) | GPIO 2 (D13) |
-| 9, 10 | GPIO 38 (console RX) | GND |
-| 11, 12 | GPIO 5 (D9) | GPIO 3 (D12) |
-| 13, 14 | GND | GPIO 4 (PCLK) |
-| 15, 16 | GPIO 21 (D11) | GPIO 28 (D7) |
-| 17, 18 | GPIO 22 (D10) | 3V3 |
-| 19, 20 | GND | GPIO 29 (D6) |
-| 21, 22 | GPIO 24 (USB FS D-) | GPIO 30 (D5) |
-| 23, 24 | GPIO 25 (USB FS D+) | GPIO 31 (D4) |
-| 25, 26 | USBD_N (USB HS D-) | GND |
-| 27, 28 | USBD_P (USB HS D+) | GPIO 34 (C5 EN) |
-| 29, 30 | GND | GPIO 35 (C5 BOOT) |
-| 31, 32 | GPIO 32 (D3) | GPIO 49 (D8) |
-| 33, 34 | GND | GPIO 50 (C5 UART RX) |
-| 35, 36 | GPIO 46 (D2) | GPIO 51 (C5 UART TX) |
-| 37, 38 | GPIO 47 (D1) | GPIO 52 (IRQ) |
-| 39, 40 | GPIO 48 (D0) | GND |
+| Pi pins | J3 pins | Odd Pi pin | Even Pi pin |
+| --- | --- | --- | --- |
+| 1, 2 | 2, 1 | 3V3 | 5V |
+| 3, 4 | 4, 3 | GPIO 7 (I2C SDA) | 5V |
+| 5, 6 | 6, 5 | GPIO 8 (I2C SCL) | GND |
+| 7, 8 | 8, 7 | GPIO 2 (D13) | GPIO 37 (console TX) |
+| 9, 10 | 10, 9 | GND | GPIO 38 (console RX) |
+| 11, 12 | 12, 11 | GPIO 3 (D12) | GPIO 5 (D9) |
+| 13, 14 | 14, 13 | GPIO 4 (PCLK) | GND |
+| 15, 16 | 16, 15 | GPIO 28 (D7) | GPIO 21 (D11) |
+| 17, 18 | 18, 17 | 3V3 | GPIO 22 (D10) |
+| 19, 20 | 20, 19 | GPIO 29 (D6) | GND |
+| 21, 22 | 22, 21 | GPIO 30 (D5) | GPIO 24 (USB FS D-) |
+| 23, 24 | 24, 23 | GPIO 31 (D4) | GPIO 25 (USB FS D+) |
+| 25, 26 | 26, 25 | GND | USBD_N (USB HS D-) |
+| 27, 28 | 28, 27 | GPIO 34 (C5 EN) | USBD_P (USB HS D+) |
+| 29, 30 | 30, 29 | GPIO 35 (C5 BOOT) | GND |
+| 31, 32 | 32, 31 | GPIO 49 (D8) | GPIO 32 (D3) |
+| 33, 34 | 34, 33 | GPIO 50 (C5 UART RX) | GND |
+| 35, 36 | 36, 35 | GPIO 51 (C5 UART TX) | GPIO 46 (D2) |
+| 37, 38 | 38, 37 | GPIO 52 (IRQ) | GPIO 47 (D1) |
+| 39, 40 | 40, 39 | GND | GPIO 48 (D0) |
 
 | P4 GPIO | Signal | From / to | Notes |
 | --- | --- | --- | --- |
