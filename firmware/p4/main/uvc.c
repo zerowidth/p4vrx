@@ -17,8 +17,9 @@
 #include "usb.h"
 #include "video.h"
 
-/* A snow keyframe is the largest the encoder makes; the rest of internal RAM is the decoder's ring and the encoder's work buffers. */
-#define UVC_BUFFER_BYTES (40 * 1024)
+/* In PSRAM: the controller's slave mode copies it into the FIFO by CPU, and a keyframe of a noisy picture
+ * reached 40 KB, which dropped it and left the host without a reference for half a second. */
+#define UVC_BUFFER_BYTES (256 * 1024)
 #define PAYLOAD_HEADER 2
 #define USB_HS_PACKET 512
 /* Frames arrive every 16.7 ms, so this only runs out if the encoder fails. */
@@ -32,6 +33,7 @@ static uint32_t s_starts;
 static uint32_t s_sent;
 static uint32_t s_skipped;
 static uint32_t s_oversize;
+static size_t s_largest;
 static volatile bool s_restart;
 /* Frames the class refused because the one before never finished on the bus. */
 static uint32_t s_refused;
@@ -153,6 +155,7 @@ static void uvc_task(void *arg)
         }
         need_key = false;
         size_t len = f.len;
+        if (len > s_largest) s_largest = len;
         if (len >= UVC_BUFFER_BYTES) {
             ++s_oversize;
             video_release(VIDEO_READER_UVC);
@@ -182,7 +185,7 @@ static void uvc_task(void *arg)
 
 void uvc_init(void)
 {
-    s_buffer = heap_caps_aligned_alloc(64, UVC_BUFFER_BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+    s_buffer = heap_caps_aligned_alloc(64, UVC_BUFFER_BYTES, MALLOC_CAP_SPIRAM);
     assert(s_buffer);
     s_submitted = xSemaphoreCreateBinary();
     xTaskCreate(uvc_task, "uvc", 4096, NULL, 5, &s_task);
@@ -196,10 +199,10 @@ void uvc_counts(uint32_t *sent, uint32_t *skipped)
 
 void uvc_info(void)
 {
-    say("usb %s%s, uvc %s, %lu start(s), %lu sent, %lu skipped, %lu too large, %lu refused, %lu revived\n",
+    say("usb %s%s, uvc %s, %lu start(s), %lu sent, %lu skipped, %lu too large (largest %u bytes), %lu refused, %lu revived\n",
         tud_mounted() ? "mounted" : "not mounted", tud_suspended() ? " (suspended)" : "",
         tud_video_n_streaming(0, 0) ? "streaming" : "idle", (unsigned long)s_starts, (unsigned long)s_sent,
-        (unsigned long)s_skipped, (unsigned long)s_oversize, (unsigned long)s_refused, (unsigned long)s_revived);
+        (unsigned long)s_skipped, (unsigned long)s_oversize, (unsigned)s_largest, (unsigned long)s_refused, (unsigned long)s_revived);
     if (s_stuck_new) {
         s_stuck_new = false;
         say("uvc stuck %lu, %lu revived: endpoint ctl %08lx int %08lx size %08lx fifo %08lx\n",

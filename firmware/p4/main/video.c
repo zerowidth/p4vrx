@@ -25,7 +25,8 @@
 #define SLOT_BYTES (256 * 1024)
 /* A keyframe every second keeps a host that joins or loses a frame from waiting long for a picture. */
 #define H264_GOP (VIDEO_FPS / 2)
-#define H264_BITRATE_DEFAULT 8000000
+/* Noise from an analog receiver costs bits: 8 Mbit/s left 17 KB a frame at 60 fps. */
+#define H264_BITRATE_DEFAULT 16000000
 #define H264_QP_MIN 26
 #define H264_QP_MAX 51
 #define TEXT_HALVES 3
