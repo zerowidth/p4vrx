@@ -28,7 +28,7 @@ The Nano's `passthru_top` registers the C5's 14 lanes on its sample clock and dr
 
 `decode on [channel]` is p4usb's decoder: `iq_start` probes at 40 MS/s (gain, then slipping the C5's clock until the rising-edge capture is clean, since the Nano re-registers the bus), then runs at 1 in 6 (13.33 MS/s) with the BitScrambler phase lookup. It fills 720x480 packed 4:2:0 frames at 60 fps; `video` shows the rate and `video grab` sends the newest frame, which `tools/grab.py` saves as PNG ([experiment](../experiments/2026-11-15-realtime-decoder.md)).
 
-While the Nano drives the bus, the UART to the C5 loses characters, so `c5_request` turns the bus off for each exchange.
+With the UART run in the ribbon beside the bus lanes, it lost characters while the Nano drove the bus. Twisted with their own grounds and off the ribbon, both lines pass every request; `c5 pause on` restores the old workaround of turning the bus off for each exchange.
 
 ## Tasks
 

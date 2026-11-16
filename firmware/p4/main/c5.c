@@ -27,8 +27,8 @@ static SemaphoreHandle_t s_ready;
 static SemaphoreHandle_t s_reply;
 static SemaphoreHandle_t s_request;
 static char s_reply_line[96];
-/* Whether c5_request turns the Nano's bus off for each exchange; `c5 pause off` tests the UART without it. */
-static bool s_pause_bus = true;
+/* Whether c5_request turns the Nano's bus off for each exchange, for wiring where the bus corrupts the UART. */
+static bool s_pause_bus = false;
 
 /* Level 1 releases the pin (high-Z); the C5's own pull-ups hold EN and BOOT high. */
 static void open_drain_released(int pin)
@@ -138,8 +138,8 @@ bool c5_request(const char *cmd, char *reply, size_t reply_len, uint32_t timeout
     }
     xSemaphoreTake(s_request, portMAX_DELAY);
     xSemaphoreTake(s_reply, 0);
-    /* The UART to the C5 loses characters both ways while the Nano drives the bus, so the bus pauses for the
-     * whole exchange, a few milliseconds. */
+    /* With the UART run beside the bus lanes, it lost characters both ways; `c5 pause on` turns the bus off for
+     * each exchange, a few milliseconds. */
     bool bus = s_pause_bus && bus_enabled();
     if (bus) bus_enable(false);
     uart_write_bytes(C5_UART, cmd, strlen(cmd));
