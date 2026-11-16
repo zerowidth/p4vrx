@@ -20,6 +20,3 @@ fpga/build/
 
 # Captures, snapshots and golden frames are large; keep them out of git
 captures/
-
-# Per-machine settings, such as the boards' USB serials
-mise.local.toml
