@@ -4,12 +4,24 @@ UI_SOURCES = %w[ui/src/ui.c ui/src/canvas.c ui/fonts/inter.c ui/sim/sim.c ui/sim
 UI_WASM = "ui/build/ui.wasm"
 UI_PORT = ENV.fetch("PORT", "8790")
 
-# Xcode's clang compiles to WebAssembly; the linker is the wasm-ld that ships with rustup's toolchain.
+UI_CLANG = "/usr/bin/clang"
+UI_NEEDS = "The UI simulator needs Xcode's clang (xcode-select --install) and rust-lld from a rustup Rust toolchain (rustup.rs)"
+
+# Xcode's clang compiles to WebAssembly. The linker is rust-lld run as wasm-ld, from the active rustup toolchain:
+# $(rustc --print sysroot)/lib/rustlib/<host>/bin/rust-lld.
 def wasm_ld
-  sysroot = IO.popen(%w[rustc --print sysroot], err: File::NULL, &:read).strip
-  found = Dir["#{sysroot}/lib/rustlib/*/bin/rust-lld"].first
-  abort "no rust-lld found; install a Rust toolchain with rustup" unless found
-  [found, "-flavor", "wasm"]
+  sysroot = IO.popen(%w[rustc --print sysroot], err: File::NULL, &:read).to_s.strip rescue ""
+  found = sysroot.empty? ? nil : Dir["#{sysroot}/lib/rustlib/*/bin/rust-lld"].first
+  [found, "-flavor", "wasm"] if found
+end
+
+def check_ui_toolchain
+  clang = File.executable?(UI_CLANG) &&
+          IO.popen([UI_CLANG, "--print-targets"], err: File::NULL, &:read).to_s.include?("wasm32")
+  missing = []
+  missing << "#{UI_CLANG} with a wasm32 target" unless clang
+  missing << "rust-lld (rustc --print sysroot found none)" unless wasm_ld
+  abort "#{UI_NEEDS}; missing: #{missing.join(", ")}" unless missing.empty?
 end
 
 namespace :ui do
@@ -21,10 +33,11 @@ namespace :ui do
 
   desc "Build #{UI_WASM}, the UI for the browser simulator"
   task :wasm do
+    check_ui_toolchain
     mkdir_p "ui/build"
     objects = UI_SOURCES.map do |src|
       obj = "ui/build/#{File.basename(src, ".c")}.o"
-      sh "/usr/bin/clang", "--target=wasm32", "-O2", "-ffreestanding", "-fno-builtin", "-nostdlib", "-Wall",
+      sh UI_CLANG, "--target=wasm32", "-O2", "-ffreestanding", "-fno-builtin", "-nostdlib", "-Wall",
          "-Iui/src", "-c", src, "-o", obj, verbose: false
       obj
     end

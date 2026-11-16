@@ -16,6 +16,7 @@ Status: planning and bench bring-up. Nothing here is usable yet.
 | `fpga/`                                     | RTL, simulation, Tang Nano 20K constraints                                  |
 | `models/`                                   | Python fixed-point models of the FPGA blocks                                |
 | `tools/`                                    | Host tools: CLI, capture, compare                                           |
+| `ui/`                                       | Panel UI in plain C, its fonts, and a browser simulator                     |
 | `reference/`                                | Read-only extracts of the p4usb and c5rx firmware this project starts from  |
 | `docs/`                                     | Findings, ledger, wiring, protocol. Start at [docs/INDEX.md](docs/INDEX.md) |
 | `enclosure/`, `hardware/`                   | 3D-printed case, KiCad board (TK)                                           |
@@ -30,6 +31,15 @@ rake -T        # tasks
 Copy `mise.local.toml.example` to `mise.local.toml` and fill in the boards' USB serials (`rake ports` lists them): `P4VRX_P4_UART_SERIAL`, `P4VRX_P4_USB_SERIAL` and `P4VRX_NANO_SERIAL`. Rake and `tools/` then only open those boards, and refuse to guess when another P4 or Nano shares the USB ID.
 
 `rake p4:flash` flashes the P4. The C5 flashes through the P4 (`rake c5:chip_id` checks the link); its own USB is unused. `rake pins:check` checks the breadboard wiring. See [docs/topics/p4-firmware.md](docs/topics/p4-firmware.md).
+
+### UI simulator
+
+`rake ui:dev` builds the panel UI to WebAssembly and serves it at http://127.0.0.1:8790/, rebuilding on every change. It needs two tools that aren't in `mise.toml`, and stops naming them if either is missing:
+
+- Xcode's clang, `/usr/bin/clang` from the Command Line Tools (`xcode-select --install`), which compiles to `wasm32`.
+- `rust-lld` from a Rust toolchain installed with rustup, run as `rust-lld -flavor wasm` (the same linker as `wasm-ld`). Rake finds it at `$(rustc --print sysroot)/lib/rustlib/<host>/bin/rust-lld` for the active toolchain.
+
+`rake ui:fonts` rebakes the fonts from Inter (`brew install --cask font-inter`). See [docs/topics/ui.md](docs/topics/ui.md).
 
 ### ESP-IDF
 

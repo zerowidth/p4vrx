@@ -11,7 +11,7 @@ The UI lives in `ui/`, apart from the firmware, so it runs both on the P4 and in
 
 `rake ui:dev` builds `ui/build/ui.wasm` and serves http://127.0.0.1:8790/ (`PORT=` to change it). It rebuilds in under a second when a file under `ui/` changes, and the page reloads itself. The page has controls for the channel, decoding, lock, signal level, sync noise and USB state. Mouse presses on the panel are touches.
 
-The build uses Xcode's clang for `--target=wasm32` and the `rust-lld` from rustup's toolchain as the linker, both already on the Mac.
+The build uses Xcode's clang (`/usr/bin/clang --target=wasm32`) and, as the linker, `rust-lld -flavor wasm` from the active rustup toolchain. The README says how to install both.
 
 ## On the P4
 
