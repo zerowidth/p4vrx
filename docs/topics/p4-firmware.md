@@ -20,7 +20,7 @@ GPIO 39-48 (D2..D0 among them) run from the P4's LDO channel 4, the board's SD c
 
 ## Capture and stills
 
-The Nano's `passthru_top` registers the C5's 14 lanes on its sample clock and drives them, with the inverted clock as PCLK, onto D13..D0 (Q7..Q1, I7..I1). It drives the bus only while the P4 holds the IRQ wire high (`pins bus on`), so a P4 in reset or before its LDO 4 is up sees high-Z.
+The Nano's `passthru_top` registers the C5's 14 lanes on its sample clock and drives them, with the inverted clock as PCLK, onto D13..D0 (Q7..Q1, I7..I1). It drives the bus only while the P4 holds the IRQ wire high (`pins bus on`), so a P4 in reset or before its LDO 4 is up sees high-Z. Use `passthru_lockout_top` instead: the C5 clock jumper picks up crosstalk from the lanes, which adds edges, and every extra edge is an extra sample. The lockout bitstream takes one C5 clock edge per 55 ns, which keeps the bus clock within 40 ppm of 80/6 MHz. `iq rate` measures the bus clock.
 
 `iq cap [samples] [pos|neg]` captures up to 1.6M samples into PSRAM through PARLIO RX (sample on the rising edge) and prints levels and per-lane toggle rates; `iq dump` sends them as base64. `still` decodes one NTSC field of a 1.4M-sample capture to 320x240 grey. `tools/iqcap.py` and `tools/still.py` run the whole sequence over the CH343 and save to `captures/` ([first frame](../experiments/2026-11-15-r4-first-frame.md)).
 

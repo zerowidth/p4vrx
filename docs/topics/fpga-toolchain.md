@@ -30,6 +30,7 @@ First build (2026-11-15): 35/384 IOB, 27 LUT4, 26 ALU, 25 DFF; 439 MHz max on th
 ## Other tops
 
 - `pintest_top` reads every wired pin and drives P4-facing pins on command, over the BL616 UART (pins 69/70), for `rake pins:check`.
+- `passthru_lockout_top` is `passthru_top` with spurious C5 clock edges locked out, timed by a 135 MHz PLL from the 27 MHz oscillator. Use it rather than `passthru_top`.
 - `passthru_top` forwards the C5 lanes to the P4 bus, enabled by the P4 on the IRQ wire. Load it only after the P4 has booted.
 
 Build or load any of them with `TOP=<name>`.
