@@ -1274,7 +1274,9 @@ static void on_pulse(uint32_t start, uint32_t width)
         if (s_missed >= LOST_AFTER_LINES) {
             s_line = start;
             s_line_frac = 0;
-            /* The learned period survives the loss: the camera's clock has not moved. */
+            /* A learned period that false hits had dragged off kept every re-acquisition drifting out of the
+             * window, and the picture sheared for good; the nominal one is within 0.15% of any camera seen. */
+            s_period = LINE_Q16;
             s_render_at = s_line + RENDER_AT;
             s_hit = true;
         } else if (err >= -LOCK_WINDOW && err <= LOCK_WINDOW) {
@@ -1284,7 +1286,8 @@ static void on_pulse(uint32_t start, uint32_t width)
             s_line_frac = pos & 0xffff;
             s_render_at = s_line + RENDER_AT;
             int32_t period = (int32_t)s_period + e16 / 256;
-            const int32_t slack = LINE_Q16 / 100;
+            /* Cameras measured 0.04-0.15% long; 0.3% leaves room without letting noise walk it away. */
+            const int32_t slack = LINE_Q16 / 333;
             if (period < (int32_t)LINE_Q16 - slack) period = LINE_Q16 - slack;
             if (period > (int32_t)LINE_Q16 + slack) period = LINE_Q16 + slack;
             s_period = period;
