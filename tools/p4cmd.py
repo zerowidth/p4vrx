@@ -18,7 +18,8 @@ def console_port(uart=False):
 def open_console(uart=False):
     s = serial.Serial()
     s.port, s.baudrate, s.timeout = console_port(uart), 115200, 0.1
-    s.dtr = s.rts = False
+    # The CH343's auto-reset circuit reacts to DTR and RTS; the USB console only writes while DTR is set.
+    s.dtr = s.rts = not uart
     s.open()
     if uart:
         time.sleep(3)  # the CH343's auto-reset circuit restarts the P4
