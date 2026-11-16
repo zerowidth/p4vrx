@@ -230,6 +230,10 @@ static int s_missed = LOST_AFTER_LINES;
 static int s_vline;
 static int s_parity;
 static uint32_t s_last_broad;
+/* Lines the clock has counted since the start, and the broad pulse that may begin a vertical interval. */
+static uint32_t s_line_count;
+static uint32_t s_vsync_candidate, s_vsync_candidate_lines;
+static int32_t s_vsync_candidate_into;
 
 /* In sixteenths of a unit. */
 static int s_tip = -57 * 16, s_blank = -17 * 16;
@@ -267,17 +271,46 @@ static uint32_t s_vsync_ignored;
  * are left as they were. */
 static bool s_vline_guessed, s_field_cut;
 static int s_vsync_missed = VSYNC_REACQUIRE;
+/* Sync events worth a look: vertical corrections, ignored broad pulses, and line clock re-acquisitions. */
+typedef struct {
+    uint32_t field;
+    int16_t vline, into;
+    uint8_t kind, missed;
+} sync_event_t;
+enum { EV_JUMP, EV_IGNORED, EV_REACQUIRE, EV_PARITY, EV_RELOAD };
+#define SYNC_EVENTS 64
+static sync_event_t s_events[SYNC_EVENTS];
+static uint32_t s_event_count;
+
+static void log_event(uint8_t kind, int into)
+{
+    s_events[s_event_count++ % SYNC_EVENTS] = (sync_event_t){s_fields, s_vline, into, kind, s_missed > 255 ? 255 : s_missed};
+}
 typedef struct {
     uint32_t busy_cycles, permille;
     int64_t start;
 } load_t;
 static load_t s_demod_load, s_draw_load;
 
+/* Gaps between DMA nodes longer than two nodes' time mean the bus clock stopped. */
+static volatile uint32_t s_node_count, s_node_gaps;
+static volatile bool s_bus_stopped;
+static volatile int64_t s_node_last_us, s_node_gap_max_us, s_node_gap_total_us;
+
 /* Only a wake-up: the driver counts one node per interrupt, so it falls behind when interrupts are late
  * and two nodes finish together. The decoder reads the DMA's position from the hardware instead. */
 static bool IRAM_ATTR on_partial(parlio_rx_unit_handle_t rx, const parlio_rx_event_data_t *e, void *arg)
 {
     static uint32_t count;
+    int64_t now = esp_timer_get_time(), gap = now - s_node_last_us;
+    if (s_node_last_us && gap > 2 * NODE_BYTES / 2 * 1000000ll / FS_HZ) {
+        ++s_node_gaps;
+        s_bus_stopped = true;
+        s_node_gap_total_us += gap;
+        if (gap > s_node_gap_max_us) s_node_gap_max_us = gap;
+    }
+    s_node_last_us = now;
+    ++s_node_count;
     BaseType_t woken = pdFALSE;
     if (++count % NOTIFY_EVERY == 0) vTaskNotifyGiveFromISR(s_task, &woken);
     return woken == pdTRUE;
@@ -1259,6 +1292,7 @@ static void render_line(void)
     }
     s_missed = s_hit ? 0 : s_missed + 1;
     s_hit = false;
+    ++s_line_count;
     /* Coast through a missing vertical sync at 262.5 lines per field: an even field counts from line 4
      * to the odd field's mid-line pulse 262.5 lines later, and an odd field from line 3. */
     if (++s_vline >= FIELD_LINES + !s_parity) {
@@ -1271,11 +1305,55 @@ static void render_line(void)
     s_render_at = s_line + RENDER_AT;
 }
 
+#define VSYNC_SLOP US(3)
+static uint32_t s_vsync_noise;
+
+/* The first broad pulse of a vertical interval began `into` samples after the line clock's line start, and the
+ * line count has advanced `since` lines from that line. */
+static void vsync(int32_t into, uint32_t since)
+{
+    int32_t line = LINE_Q16 >> 16, half = line / 2;
+    /* Found at its end, a pulse can start lines before the clock's current line. */
+    while (into < -half / 2) {
+        into += line;
+        ++since;
+    }
+    /* Broad pulses start with a line or half way through one; noise that runs into an hsync starts earlier. */
+    if (abs(into) > VSYNC_SLOP && abs(into - half) > VSYNC_SLOP) {
+        ++s_vsync_noise;
+        return;
+    }
+    int vline = s_vline - (int)since;
+    if (vline < 0) vline += FIELD_LINES + !s_parity;
+    bool expected = vline >= FIELD_LINES - VSYNC_WINDOW || vline <= VSYNC_LINE + VSYNC_WINDOW;
+    if (!expected && s_vsync_missed < VSYNC_REACQUIRE && !s_vline_guessed) {
+        ++s_vsync_ignored;
+        log_event(EV_IGNORED, into);
+        return;
+    }
+    s_vsync_missed = 0;
+    int parity = into > half / 2 && into < half * 3 / 2;
+    /* The count wraps at 262 and 263 lines alternately, so one line either way is expected. */
+    bool jump = abs(vline - VSYNC_LINE) > 1 && vline < FIELD_LINES - 1 && !s_vline_guessed;
+    if (jump) {
+        ++s_vjumps;
+        log_event(EV_JUMP, into);
+    } else if (parity != s_parity && !s_vline_guessed) {
+        log_event(EV_PARITY, into);
+    }
+    s_parity = parity;
+    s_vline_guessed = false;
+    /* An odd field's first broad pulse starts mid-way through line 3; an even field's starts line 4. */
+    s_vline = (parity ? VSYNC_LINE : VSYNC_LINE + 1) + (int)since;
+    ++s_field_vsync;
+}
+
 static void on_pulse(uint32_t start, uint32_t width)
 {
     if (width >= HSYNC_MIN && width <= HSYNC_MAX) {
         int32_t err = (int32_t)(start - s_line);
         if (s_missed >= LOST_AFTER_LINES) {
+            log_event(EV_REACQUIRE, (int32_t)(start - s_line));
             s_line = start;
             s_line_frac = 0;
             /* A learned period that false hits had dragged off kept every re-acquisition drifting out of the
@@ -1298,25 +1376,19 @@ static void on_pulse(uint32_t start, uint32_t width)
             s_hit = true;
         }
     } else if (width >= BROAD_MIN) {
-        /* The first broad pulse of a vertical interval: it starts a whole line after an even field's
-         * last hsync and half a line into the line for an odd field. */
-        bool expected = s_vline >= FIELD_LINES - VSYNC_WINDOW || s_vline <= VSYNC_LINE + VSYNC_WINDOW;
-        bool first = start - s_last_broad > 4 * (LINE_Q16 >> 16);
-        if (first && !expected && s_vsync_missed < VSYNC_REACQUIRE) {
-            ++s_vsync_ignored;
-        } else if (first) {
-            s_vsync_missed = 0;
-            int32_t into = (int32_t)(start - s_line);
-            int32_t half = LINE_Q16 >> 17;
-            s_parity = into > half / 2 && into < half * 3 / 2;
-
-            /* The count wraps at 262 and 263 lines alternately, so one line either way is expected. */
-            if (abs(s_vline - VSYNC_LINE) > 1 && s_vline < FIELD_LINES - 1 && !s_vline_guessed) ++s_vjumps;
-            s_vline_guessed = false;
-            /* An odd field's first broad pulse starts mid-way through line 3; an even field's starts line 4,
-             * which is the line the clock has just begun. */
-            s_vline = s_parity ? VSYNC_LINE : VSYNC_LINE + 1;
-            ++s_field_vsync;
+        /* Broad pulses come every half line through the vertical interval, so one is believed only when the next
+         * follows it by half a line, or by a line when the count is wrong and the detector skips to each hsync:
+         * a lone stretch of noise below the slicer moved the count for four fields. */
+        int32_t line = LINE_Q16 >> 16, half = line / 2;
+        int32_t since = (int32_t)(start - s_last_broad);
+        bool first = since > 4 * line;
+        if (first) {
+            s_vsync_candidate = start;
+            s_vsync_candidate_lines = s_line_count;
+            s_vsync_candidate_into = (int32_t)(start - s_line);
+        } else if (s_vsync_candidate == s_last_broad && (abs(since - half) < half / 8 || abs(since - line) < half / 8)) {
+            vsync(s_vsync_candidate_into, s_line_count - s_vsync_candidate_lines);
+            s_vsync_candidate = start - 1;
         }
         s_last_broad = start;
     }
@@ -1362,6 +1434,7 @@ static int32_t box_ending(uint32_t nb)
 static void coast(uint32_t until)
 {
     while ((int32_t)(until - s_render_at) >= 0) {
+        ++s_line_count;
         if (++s_vline >= FIELD_LINES + !s_parity) {
             s_vline = 0;
             s_parity ^= 1;
@@ -1595,6 +1668,7 @@ static void bs_reload(void)
     }
     skip_stale(stale);
     s_bs_reload_us = s_read_us - t0;
+    log_event(EV_RELOAD, s_bs_reload_us);
     /* The lines that went by meanwhile, counting half a node for what the DMA had not finished. */
     const int last = FIRST_ACTIVE + ACTIVE_LINES - 1;
     for (int k = (s_bs_reload_us + NODE_BYTES * 250000ll / FS_HZ + 32) / 64; k > 0; --k) {
@@ -1676,6 +1750,11 @@ static void decode_task(void *arg)
             if (now - s_read_us > RING_US - 500) {
                 ++s_overruns;
                 s_read = end;
+            }
+            /* Lines went by unseen while the bus stopped, so the count is a guess until the next vertical sync. */
+            if (s_bus_stopped) {
+                s_bus_stopped = false;
+                s_vline_guessed = s_field_cut = true;
             }
             /* Before a reload, a second pass takes what arrived during the first, so less is thrown away. */
             for (int pass = 0; pass < (s_bs_pending ? 2 : 1); ++pass, end = dma_offset())
@@ -1829,8 +1908,8 @@ static void status(void)
         s_running ? "running" : "stopped", s_channel, s_mhz, (unsigned long)s_fields, (unsigned long)s_last_hits, FIELD_LINES,
         s_last_vsync_ok ? ", vsync" : ", no vsync", (unsigned long)(s_period >> 16),
         (unsigned long)((s_period & 0xffff) * 1000 >> 16));
-    say("%lu vertical corrections, %lu broad pulses ignored outside the vsync window\n", (unsigned long)s_vjumps,
-        (unsigned long)s_vsync_ignored);
+    say("%lu vertical corrections, %lu broad pulses ignored outside the vsync window, %lu off the line's start or middle\n",
+        (unsigned long)s_vjumps, (unsigned long)s_vsync_ignored, (unsigned long)s_vsync_noise);
 
     say("gain %d (%s), I/Q RMS %d, %d.%d%% clipped\n", s_gain, s_agc ? "auto" : "fixed", s_rms,
         s_clip_permille / 10, s_clip_permille % 10);
@@ -2131,11 +2210,25 @@ void decode_command(int argc, char **argv)
         s_clicks = strcmp(argv[2], "off") == 0 ? CLICKS_SHOWN : strcmp(argv[2], "gray") == 0 ? CLICKS_GRAY : CLICKS_HOLD;
     } else if (strcmp(sub, "luma") == 0 && argc > 2) {
         s_luma_kind = strcmp(argv[2], "plain") == 0 ? LUMA_PLAIN : strcmp(argv[2], "peak") == 0 ? LUMA_PEAK : LUMA_SOFT;
+    } else if (strcmp(sub, "nodes") == 0) {
+        say("%lu nodes, %lu gaps over two nodes' time totalling %lld us, the longest %lld us\n", (unsigned long)s_node_count,
+            (unsigned long)s_node_gaps, s_node_gap_total_us, s_node_gap_max_us);
+        s_node_gaps = 0;
+        s_node_gap_total_us = s_node_gap_max_us = 0;
+    } else if (strcmp(sub, "events") == 0) {
+        static const char *names[] = {"jump", "ignored", "reacquire", "parity", "reload"};
+        uint32_t n = s_event_count < SYNC_EVENTS ? s_event_count : SYNC_EVENTS;
+        say("%lu sync events, the last %lu (field, kind, line count, samples from the line clock, lines missed):\n",
+            (unsigned long)s_event_count, (unsigned long)n);
+        for (uint32_t i = s_event_count - n; i != s_event_count; ++i) {
+            const sync_event_t *e = &s_events[i % SYNC_EVENTS];
+            say("%lu %s %d %d %u\n", (unsigned long)e->field, names[e->kind], e->vline, e->into, e->missed);
+        }
     } else if (strcmp(sub, "bench") == 0) {
         bench();
     } else if (strcmp(sub, "") == 0) {
         status();
     } else {
-        say("decode [on [channel] | off | place | dc I Q|auto | gain auto|N | sat PERCENT | luma plain|soft|peak | clicks hold|gray|off | wraps fix|off | tnr auto|LEVELS [SIXTEENTHS] | bench]\n");
+        say("decode [on [channel] | off | place | dc I Q|auto | gain auto|N | sat PERCENT | luma plain|soft|peak | clicks hold|gray|off | wraps fix|off | tnr auto|LEVELS [SIXTEENTHS] | events | nodes | bench]\n");
     }
 }
