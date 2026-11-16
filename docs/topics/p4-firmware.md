@@ -43,4 +43,4 @@ At 1 in 6, `iq_start` slips the C5's clock until a capture shows the fewest phas
 
 At power-up the P4 starts decoding on the last channel started with `decode on`, kept in NVS (namespace `p4vrx`, key `channel`). With none saved it waits for `decode on`.
 
-The LCD (`lcd.c`, adapted from Waveshare's BSP, Apache-2.0) shows each decoded field: the PPA scales it to 630x480, turns it a quarter turn and converts it to RGB565 in one of three DPI frame buffers, about 12 ms a frame, at 59.8 fps alongside UVC. `lcd` reports rates; `lcd rotate` flips the picture.
+The LCD (`lcd.c`, adapted from Waveshare's BSP, Apache-2.0) shows each decoded field: the PPA scales it to 630x480 on the panel's left, turns it a quarter turn and converts it to RGB565 in one of three DPI frame buffers, about 12 ms a frame, at 59.8 fps alongside UVC. The 170 px on the right hold the UI ([ui](ui.md)). `lcd` reports rates, `lcd rotate` flips the picture and `lcd grab` sends the frame buffer (`tools/lcdgrab.py`).

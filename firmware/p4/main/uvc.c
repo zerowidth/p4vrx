@@ -210,3 +210,13 @@ void uvc_info(void)
             (unsigned long)s_stuck[2], (unsigned long)s_stuck[3]);
     }
 }
+
+bool uvc_mounted(void)
+{
+    return tud_mounted();
+}
+
+bool uvc_streaming(void)
+{
+    return tud_mounted() && tud_video_n_streaming(0, 0);
+}

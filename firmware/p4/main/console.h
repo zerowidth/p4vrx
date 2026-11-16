@@ -12,6 +12,8 @@
 
 void console_init(void);
 void host_write(const void *data, size_t len);
+/* Bytes as base64 lines of 76 characters. */
+void console_base64(const void *data, size_t len);
 void say(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 void console_feed(uint8_t c);
 void console_reboot(bool download);

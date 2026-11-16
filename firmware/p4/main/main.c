@@ -9,6 +9,7 @@
 #include "decode.h"
 #include "lcd.h"
 #include "pins.h"
+#include "screen.h"
 #include "usb.h"
 #include "uvc.h"
 #include "video.h"
@@ -22,6 +23,7 @@ void app_main(void)
     console_init();
     video_init();
     lcd_init();
+    screen_init();
     uvc_init();
     usb_init();
     decode_autostart();

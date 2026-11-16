@@ -185,3 +185,22 @@ void console_feed(uint8_t c)
         host_write(&c, 1);
     }
 }
+
+void console_base64(const void *data, size_t len)
+{
+    static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const uint8_t *p = data;
+    char line[77];
+    for (size_t off = 0; off < len; off += 57) {
+        size_t chunk = len - off < 57 ? len - off : 57, o = 0;
+        for (size_t k = 0; k < chunk; k += 3) {
+            uint32_t v = p[off + k] << 16 | (k + 1 < chunk ? p[off + k + 1] << 8 : 0) | (k + 2 < chunk ? p[off + k + 2] : 0);
+            line[o++] = b64[v >> 18 & 63];
+            line[o++] = b64[v >> 12 & 63];
+            line[o++] = k + 1 < chunk ? b64[v >> 6 & 63] : '=';
+            line[o++] = k + 2 < chunk ? b64[v & 63] : '=';
+        }
+        line[o++] = '\n';
+        host_write(line, o);
+    }
+}

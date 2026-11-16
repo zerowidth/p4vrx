@@ -8,6 +8,7 @@
 
 #include "driver/ledc.h"
 #include "driver/ppa.h"
+#include "esp_cache.h"
 #include "esp_heap_caps.h"
 #include "esp_lcd_mipi_dsi.h"
 #include "esp_lcd_panel_ops.h"
@@ -19,6 +20,7 @@
 #include "freertos/task.h"
 
 #include "console.h"
+#include "ui.h"
 #include "video.h"
 
 #define LCD_W 480
@@ -30,7 +32,9 @@
 #define FRAME_BYTES (LCD_W * LCD_H * 2)
 /* The decoded 720x480 is 4:3 with narrow pixels: 630x480 on the panel's square ones. */
 #define SCALE_X 0.875f
-#define PIC_W 630
+#define PIC_W UI_PIC_W
+#define STRIP_W UI_STRIP_W
+#define STRIP_BYTES (STRIP_W * LCD_W * 2)
 
 static const st7701_lcd_init_cmd_t s_st7701_init[] = {
     {0xFF, (uint8_t[]){0x77, 0x01, 0x00, 0x00, 0x13}, 5, 0},
@@ -95,6 +99,51 @@ static TaskHandle_t s_task;
 static const uint8_t *volatile s_pending;
 static ppa_srm_rotation_angle_t s_rotation = PPA_SRM_ROTATION_ANGLE_270;
 static uint32_t s_shown, s_offered, s_late, s_ppa_us, s_fps_tenths;
+
+/* The UI strip right of the picture, drawn in landscape and turned into each frame buffer once after it
+ * changes: the picture's scaling writes only its own block, so the buffers keep the strip in between. */
+static canvas_t s_strip;
+static SemaphoreHandle_t s_strip_lock;
+static volatile uint8_t s_strip_stale;
+static uint32_t s_strip_copies, s_strip_us;
+
+static bool turned_270(void)
+{
+    return s_rotation == PPA_SRM_ROTATION_ANGLE_270;
+}
+
+/* The PPA turns the strip as it turns the picture, into the rows after the picture's or before them. */
+static void copy_strip(void *fb)
+{
+    int64_t t0 = esp_timer_get_time();
+    const ppa_srm_oper_config_t srm = {
+        .in = {.buffer = s_strip.px, .pic_w = STRIP_W, .pic_h = LCD_W, .block_w = STRIP_W, .block_h = LCD_W,
+               .srm_cm = PPA_SRM_COLOR_MODE_RGB565},
+        .out = {.buffer = fb, .buffer_size = FRAME_BYTES, .pic_w = LCD_W, .pic_h = LCD_H,
+                .block_offset_x = 0, .block_offset_y = turned_270() ? PIC_W : 0, .srm_cm = PPA_SRM_COLOR_MODE_RGB565},
+        .rotation_angle = s_rotation,
+        .scale_x = 1.0f,
+        .scale_y = 1.0f,
+        .mode = PPA_TRANS_MODE_BLOCKING,
+    };
+    if (ppa_do_scale_rotate_mirror(s_srm, &srm) != ESP_OK) return;
+    s_strip_us = esp_timer_get_time() - t0;
+    ++s_strip_copies;
+}
+
+canvas_t *lcd_strip_begin(void)
+{
+    if (!s_strip_lock) return NULL;
+    xSemaphoreTake(s_strip_lock, portMAX_DELAY);
+    return &s_strip;
+}
+
+void lcd_strip_end(void)
+{
+    esp_cache_msync(s_strip.px, STRIP_BYTES, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+    s_strip_stale = 7;
+    xSemaphoreGive(s_strip_lock);
+}
 
 static bool IRAM_ATTR on_vsync(esp_lcd_panel_handle_t panel, esp_lcd_dpi_panel_event_data_t *e, void *arg)
 {
@@ -177,7 +226,7 @@ static void show(const uint8_t *yuv)
         .in = {.buffer = yuv, .pic_w = VIDEO_WIDTH, .pic_h = VIDEO_HEIGHT, .block_w = VIDEO_WIDTH, .block_h = VIDEO_HEIGHT,
                .srm_cm = PPA_SRM_COLOR_MODE_YUV420, .yuv_range = PPA_COLOR_RANGE_FULL, .yuv_std = PPA_COLOR_CONV_STD_RGB_YUV_BT601},
         .out = {.buffer = fb, .buffer_size = FRAME_BYTES, .pic_w = LCD_W, .pic_h = LCD_H,
-                .block_offset_x = 0, .block_offset_y = (LCD_H - PIC_W) / 2, .srm_cm = PPA_SRM_COLOR_MODE_RGB565},
+                .block_offset_x = 0, .block_offset_y = turned_270() ? 0 : STRIP_W, .srm_cm = PPA_SRM_COLOR_MODE_RGB565},
         .rotation_angle = s_rotation,
         .scale_x = SCALE_X,
         .scale_y = 1.0f,
@@ -185,6 +234,11 @@ static void show(const uint8_t *yuv)
     };
     if (ppa_do_scale_rotate_mirror(s_srm, &srm) != ESP_OK) return;
     s_ppa_us = esp_timer_get_time() - t0;
+    if (s_strip_stale & 1 << s_back && xSemaphoreTake(s_strip_lock, 0) == pdTRUE) {
+        copy_strip(fb);
+        s_strip_stale &= ~(1 << s_back);
+        xSemaphoreGive(s_strip_lock);
+    }
     /* Two frames queued within one refresh would leave the next target on screen. */
     if (s_queued && xSemaphoreTake(s_vsync, pdMS_TO_TICKS(40)) != pdTRUE) ++s_late;
     xSemaphoreTake(s_vsync, 0);
@@ -225,6 +279,8 @@ void lcd_init(void)
     clear(s_fb[0]);
     clear(s_fb[1]);
     clear(s_fb[2]);
+    s_strip = (canvas_t){heap_caps_aligned_calloc(128, 1, STRIP_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA), STRIP_W, LCD_W, STRIP_W};
+    if (s_strip.px) s_strip_lock = xSemaphoreCreateMutex();
     xTaskCreatePinnedToCore(lcd_task, "lcd", 4096, NULL, 3, &s_task, 0);
 }
 
@@ -252,12 +308,30 @@ void lcd_command(int argc, char **argv)
         say("ok\n");
         return;
     }
+    if (strcmp(sub, "grab") == 0) {
+        /* The buffer last handed to the panel, as the panel scans it: 480 wide, 800 tall. */
+        bool paused = s_paused;
+        s_paused = true;
+        vTaskDelay(pdMS_TO_TICKS(50));
+        const void *fb = s_fb[(s_back + 2) % 3];
+        esp_cache_msync((void *)fb, FRAME_BYTES, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+        say("lcd grab begin %d %d\n", LCD_W, LCD_H);
+        console_base64(fb, FRAME_BYTES);
+        say("lcd grab end\n");
+        s_paused = paused;
+        return;
+    }
     if (strcmp(sub, "rotate") == 0) {
         s_rotation = s_rotation == PPA_SRM_ROTATION_ANGLE_270 ? PPA_SRM_ROTATION_ANGLE_90 : PPA_SRM_ROTATION_ANGLE_270;
+        clear(s_fb[0]);
+        clear(s_fb[1]);
+        clear(s_fb[2]);
+        s_strip_stale = 7;
         say("ok, turned %d degrees\n", s_rotation == PPA_SRM_ROTATION_ANGLE_270 ? 270 : 90);
         return;
     }
     say("lcd %lu.%lu fps, %lu shown of %lu offered, %lu missed a refresh, last scale and turn %lu us\n",
         (unsigned long)(s_fps_tenths / 10), (unsigned long)(s_fps_tenths % 10), (unsigned long)s_shown,
         (unsigned long)s_offered, (unsigned long)s_late, (unsigned long)s_ppa_us);
+    say("strip copied %lu times, the last in %lu us\n", (unsigned long)s_strip_copies, (unsigned long)s_strip_us);
 }
