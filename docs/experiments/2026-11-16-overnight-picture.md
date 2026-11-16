@@ -39,3 +39,6 @@ Adopted: the line-period reset and clamp, and clock placement at the decode rate
 - If sampling comes back into it: feed the PLL from a dedicated clock pin, or try Gowin's IODELAY per lane.
 
 ![p4vrx against p4usb, before and after](img/2026-11-16-p4vrx-vs-p4usb.jpg)
+
+
+Update: the colour fault turned out to be spurious C5 clock edges from crosstalk on the C5-to-Nano jumper, fixed with `passthru_lockout_top`; see [PCLK extra edges](2026-11-16-pclk-extra-edges.md).

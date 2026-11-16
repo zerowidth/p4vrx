@@ -29,6 +29,7 @@ Why does p4vrx's colour come out 2x over-saturated, with hue jumps that change w
 - With it, decoding R4: line period 847.39 samples (847.41 nominal); sync-tip noise 93-156 kHz across clock places (150-1000 before); 74 lines with clicks in 30 s, about 0.04 a field (about 42 a field before); burst steady at 8855.
 - Side by side with p4usb (`img/2026-11-16-lockout-vs-p4usb.jpg`, p4vrx left): saturation 14.5 vs 15.6, row-to-row chroma jumps 3.6 vs 3.5, luma high-pass 4.41 vs 4.14. Before the lockout: 30.2 vs 15.2 and 13.6 vs 3.2.
 - With the lockout, scoring clock places by sync-tip noise alone left 0-22 click lines a field across 8 starts. Scoring by tip noise plus 10 per click line a field, and stopping at any place under 130: 10 of 10 starts settled at 93-117 kHz with 0.0-0.1 click lines a field.
+- A 60-minute soak on the lockout bitstream (`captures/soak2/`): 1731 readings, never below 223 of 262 hsyncs (mean 253.5), no loss of lock; line period 847.386-847.397 samples; click lines a field median 0.02, p90 0.04, mean 0.18 (one burst of 50). Across 12 grabs from each camera, p4vrx vs p4usb: saturation 14.3-14.5 vs 15.5-16.0, chroma row jumps 3.4-3.6 vs 3.3-4.0, luma high-pass 4.37-4.41 vs 4.12-4.32.
 - The P4's GPIO glitch filter on PCLK at 20/16 ns or longer stops the capture; anything shorter is refused.
 
 ## Verdict
