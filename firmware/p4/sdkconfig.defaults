@@ -15,3 +15,6 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=32768
 # I/Q captures live in the in-package PSRAM.
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_SPEED_200M=y
+
+# The decoder's per-sample loop needs optimized code.
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
