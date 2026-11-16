@@ -1,5 +1,6 @@
-# The P4's bitmap fonts, baked from Inter (SIL OFL 1.1) as installed by `brew install --cask font-inter`.
-INTER = ENV.fetch("INTER_TTF", "/opt/homebrew/Caskroom/font-inter/4.1/extras/ttf/Inter-SemiBold.ttf")
+# The P4's bitmap fonts, baked from Inter (SIL OFL 1.1) as `brew install --cask font-inter` installs it.
+INTER = ENV["INTER_TTF"] ||
+        Dir["/opt/homebrew/Caskroom/font-inter/*/extras/ttf/Inter-SemiBold.ttf"].max_by { |p| Gem::Version.new(p[%r{font-inter/([^/]+)/}, 1]) rescue Gem::Version.new("0") }
 UI_SOURCES = %w[ui/src/ui.c ui/src/canvas.c ui/fonts/inter.c ui/sim/sim.c ui/sim/libc.c].freeze
 UI_WASM = "ui/build/ui.wasm"
 UI_PORT = ENV.fetch("PORT", "8790")
@@ -27,6 +28,7 @@ end
 namespace :ui do
   desc "Bake ui/fonts/inter.c from Inter SemiBold (INTER_TTF=path to use another file)"
   task :fonts do
+    abort "no Inter-SemiBold.ttf: brew install --cask font-inter, or set INTER_TTF" unless INTER && File.file?(INTER)
     sh "uv", "run", "-q", "--with", "freetype-py", "ui/fonts/bake.py", INTER, "ui/fonts/inter.c",
        "font_small:20", "font_medium:36", "font_large:80: 0123456789ABEFLRXabefhlrx-"
   end

@@ -39,7 +39,7 @@ Copy `mise.local.toml.example` to `mise.local.toml` and fill in the boards' USB 
 - Xcode's clang, `/usr/bin/clang` from the Command Line Tools (`xcode-select --install`), which compiles to `wasm32`.
 - `rust-lld` from a Rust toolchain installed with rustup, run as `rust-lld -flavor wasm` (the same linker as `wasm-ld`). Rake finds it at `$(rustc --print sysroot)/lib/rustlib/<host>/bin/rust-lld` for the active toolchain.
 
-`rake ui:fonts` rebakes the fonts from Inter (`brew install --cask font-inter`). See [docs/topics/ui.md](docs/topics/ui.md).
+The baked fonts (`ui/fonts/inter.c`) are committed, so building needs nothing more. Only `rake ui:fonts`, which rebakes them, needs Inter from the `font-inter` Homebrew cask (`brew install --cask font-inter`; `INTER_TTF=path` uses another copy) and FreeType's Python bindings, which `uv` fetches as `freetype-py`. See [ui/fonts/README.md](ui/fonts/README.md) and [docs/topics/ui.md](docs/topics/ui.md).
 
 ### ESP-IDF
 
