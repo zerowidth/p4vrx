@@ -17,6 +17,7 @@
 #include "bridge.h"
 #include "console.h"
 #include "decode.h"
+#include "lcd.h"
 #include "overlay.h"
 #include "uvc.h"
 
@@ -203,9 +204,14 @@ static void video_task(void *arg)
         } else {
             continue;
         }
+        if (!field) {
+            gray_to_yuv420(raw);
+            raw = s_yuv420;
+        }
+        lcd_offer(raw);
         int64_t t1 = esp_timer_get_time();
         if (!s_encode) continue;
-        encode(raw, field, seq, t0);
+        encode(raw, true, seq, t0);
         int64_t t2 = esp_timer_get_time();
         s_render_us = t1 - t0;
         s_encode_us = t2 - t1;

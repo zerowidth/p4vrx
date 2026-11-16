@@ -40,3 +40,5 @@ With the UART run in the ribbon beside the bus lanes, it lost characters while t
 At 1 in 6, `iq_start` slips the C5's clock until a capture shows the fewest phase spikes, since the 40 MS/s probe's place doesn't carry over. `iq counter q|i [MHz]` runs the C5's counter on one lane group and counts repeats and skips through the Nano.
 
 At power-up the P4 starts decoding on the last channel started with `decode on`, kept in NVS (namespace `p4vrx`, key `channel`). With none saved it waits for `decode on`.
+
+The LCD (`lcd.c`, adapted from Waveshare's BSP, Apache-2.0) shows each decoded field: the PPA scales it to 630x480, turns it a quarter turn and converts it to RGB565 in one of three DPI frame buffers, about 12 ms a frame, at 59.8 fps alongside UVC. `lcd` reports rates; `lcd rotate` flips the picture.

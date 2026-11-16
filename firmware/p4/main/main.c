@@ -7,6 +7,7 @@
 #include "c5.h"
 #include "console.h"
 #include "decode.h"
+#include "lcd.h"
 #include "pins.h"
 #include "usb.h"
 #include "uvc.h"
@@ -20,6 +21,7 @@ void app_main(void)
     pins_init();
     console_init();
     video_init();
+    lcd_init();
     uvc_init();
     usb_init();
     decode_autostart();

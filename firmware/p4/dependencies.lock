@@ -1,4 +1,14 @@
 dependencies:
+  espressif/cmake_utilities:
+    component_hash: 351350613ceafba240b761b4ea991e0f231ac7a9f59a9ee901f751bddc0bb18f
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.1'
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    version: 0.5.3
   espressif/esp_h264:
     component_hash: c32e94b137aef712b5a347bf0c29d59eecfbcdbf62a0b6848810c8ecbe363261
     dependencies:
@@ -13,6 +23,24 @@ dependencies:
     - esp32s31
     - esp32p4
     version: 1.5.0
+  espressif/esp_lcd_st7701:
+    component_hash: 924f346e36da39aaa38177e21bd360b5442abc792338fb64ad1e644481255898
+    dependencies:
+    - name: espressif/cmake_utilities
+      registry_url: https://components.espressif.com
+      require: private
+      version: 0.*
+    - name: idf
+      require: private
+      version: '>=5.4'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    targets:
+    - esp32s3
+    - esp32s31
+    - esp32p4
+    version: 2.0.2~2
   espressif/tinyusb:
     component_hash: a40b7f67df6ac254a4afd96c6401cc56f2059ae747d6d7e66b568bca53ad0edc
     dependencies:
@@ -35,7 +63,8 @@ dependencies:
     version: 6.1.0
 direct_dependencies:
 - espressif/esp_h264
+- espressif/esp_lcd_st7701
 - espressif/tinyusb
-manifest_hash: 585b97da0873796a2c7e649700a5dc05a0d212fda3d796305a4b0f076995f760
+manifest_hash: 1de78740663159d3fb81cfc9327468a27bd061baa178cfcd62c1ce23294dae80
 target: esp32p4
 version: 3.0.0
