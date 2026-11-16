@@ -14,8 +14,8 @@ def fpga_tool(name)
   found.empty? ? abort("#{name} not found; run mise install") : found
 end
 
-# openFPGALoader can hang at "Erase SRAM"; `openFPGALoader -b tangnano20k -r` (reconfigure from flash) clears it.
-def fpga_loader(*args, seconds: 120)
+# openFPGALoader sometimes hangs at "Erase SRAM"; reconfiguring the FPGA from flash (-r) clears it.
+def fpga_loader_once(args, seconds)
   cmd = [fpga_tool("openFPGALoader"), "-b", "tangnano20k", *args]
   puts cmd.join(" ")
   pid = Process.spawn(*cmd)
@@ -24,11 +24,21 @@ def fpga_loader(*args, seconds: 120)
     if Time.now > deadline
       Process.kill("TERM", pid)
       Process.wait(pid)
-      abort "openFPGALoader timed out after #{seconds} s; try openFPGALoader -b tangnano20k -r"
+      return :timeout
     end
     sleep 0.2
   end
-  abort "openFPGALoader failed" unless $?.success?
+  $?.success? ? :ok : :failed
+end
+
+def fpga_loader(*args, seconds: 120)
+  result = fpga_loader_once(args, seconds)
+  if result == :timeout
+    warn "openFPGALoader timed out after #{seconds} s; reconfiguring from flash and retrying"
+    fpga_loader_once(["-r"], 30)
+    result = fpga_loader_once(args, seconds)
+  end
+  abort "openFPGALoader #{result}" unless result == :ok
 end
 
 namespace :fpga do
