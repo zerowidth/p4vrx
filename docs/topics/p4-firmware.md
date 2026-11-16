@@ -36,3 +36,5 @@ With the UART run in the ribbon beside the bus lanes, it lost characters while t
 - `rake p4:console` opens the console in picocom.
 - `rake c5:flash`, `rake c5:chip_id` and `rake c5:pinwalk` run esptool through the bridge. Over the CH343, set `PORT` to its port and `BAUD=115200`.
 - `rake pins:check` runs the wiring check ([experiment](../experiments/2026-11-15-pin-mapping.md)).
+
+At 1 in 6, `iq_start` slips the C5's clock until a capture shows the fewest phase spikes, since the 40 MS/s probe's place doesn't carry over. `iq counter q|i [MHz]` runs the C5's counter on one lane group and counts repeats and skips through the Nano.
