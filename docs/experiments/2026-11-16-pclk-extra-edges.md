@@ -24,6 +24,7 @@ Why does p4vrx's colour come out 2x over-saturated, with hue jumps that change w
 - Bus clock by what the lanes carry, at default drive: static bits (31 31) +17 ppm; link counter exactly 240/19 MHz; I/Q (9 19) +1400 to +18500 ppm, depending on gain (+1400 at 60, +18500 at 40) and clock place; the lowest, busiest bits (6 6) +6.9%.
 - The extra rate matches the line period: +6916 ppm read 853.1 samples a line, against 847.41 x 1.006916 = 853.27.
 - Pad drive 0 on the data lanes brought one session down to +36 to +189 ppm at every one of 20 places. After the next `iq start` it read +3933 to +7019 ppm.
+- With `passthru_pll_top` loaded, whose clock to the P4 comes only from the Nano's PLL (locked to the C5 clock, and gated off while unlocked): static lanes +17 ppm; I/Q at gain 60, 52 and 40 read -50,000, -96,000 and -400,000 ppm; the busiest bits -564,000 ppm. Lane activity breaks the PLL's lock, so the C5 clock is already corrupted at the Nano's input (C5 GPIO 0 to Nano 77, a breadboard jumper among the lane jumpers).
 - The P4's GPIO glitch filter on PCLK at 20/16 ns or longer stops the capture; anything shorter is refused.
 
 ## Verdict
@@ -32,6 +33,6 @@ Open, needs wiring. Crosstalk from the data lanes adds spurious PCLK edges at 0.
 
 ## Next
 
-- Run PCLK on its own wire, twisted with a ground and away from the data lanes, on whichever hops (C5 to Nano, Nano to P4) share the ribbon; try a 33-47 ohm series resistor at the C5's clock pin.
-- If the coupling is on the C5-to-Nano hop, try a digital glitch filter on PCLK in the Nano.
+- Run the C5 clock jumper (C5 GPIO 0 to Nano 77) on its own wire, twisted with a ground and away from the lane jumpers; do the same for Nano 26 to P4 GPIO 4, which is on the ribbon. Try a 33-47 ohm series resistor at the C5's clock pin.
+- A digital glitch filter on the C5 clock in the Nano, since the coupling reaches the Nano's input.
 - Re-run `iq rate` and the side-by-side after each change; the target is under 50 ppm in every state.
