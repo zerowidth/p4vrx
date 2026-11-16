@@ -9,8 +9,10 @@ GPIOs. Go by the P4's silkscreen, not the breakout's Raspberry Pi labels.
 
 ## P4 header
 
-All 20 usable GPIOs are assigned. 24/25 (the header's USB D-/D+) and 37/38 (the
+All 20 usable GPIOs are assigned. 24/25 (the full-speed USB pair on header pins 19/21) and 37/38 (the
 P4 console on the CH343P) stay unused.
+
+Header pins 23 and 25 are USBD_N and USBD_P, the high-speed USB pair that also goes to the board's USB-C port (Waveshare schematic, J3). They must stop at the P4: carried down the ribbon and breakout, the stubs broke the 480 Mbit/s link, which stalled after a few replies or never enumerated. Leave those two ribbon conductors unconnected (pull the pins from the gender changer or cut the conductors). The PCB must not route them anywhere.
 
 | P4 GPIO | Signal | From / to | Notes |
 | --- | --- | --- | --- |

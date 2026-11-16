@@ -6,16 +6,7 @@
 
 The same line console answers on the high-speed USB (CDC, 303a:8000) and on UART0 through the CH343 (1a86:55d3). Replies go where the last input came from. Commands: `help`, `info`, `reboot [download]`, `pins`, `c5`.
 
-The USB console stalls after two to four replies: the P4 keeps receiving and running commands, but its bulk IN transfer never completes until the host reopens the port. Ruled out (2026-11-15):
-
-- TinyUSB 0.21 instead of 0.19, DWC2 DMA instead of slave mode, and pinning the USB task to the interrupt's core.
-- p4usb's false-suspend workaround; `suspended` stays 0.
-- Espressif's esp_tinyusb 2.4.0 wrapper (its own PHY setup, task on core 1, standard descriptors with a qualifier) stalls the same way.
-- p4usb itself, rebuilt for rev v3, doesn't enumerate on this board at all.
-
-- Espressif's untouched `tusb_serial_device` example stalls the same way after one echo; CherryUSB's example doesn't enumerate.
-
-So it is outside our firmware: the cable, the USB 2.1 hub or the Mac. Next: the P4's high-speed port straight into the Mac with another cable. Until then, scripted work uses the CH343, whose auto-reset circuit restarts the P4 when the port opens.
+The high-speed USB console works once header pins 23/25 (the high-speed pair, also on the header) don't continue down the ribbon: with the header disconnected it passed 360 commands and 200 back-to-back replies (342 KB) with nothing dropped. Before that, ribbon stubs on the pair made it stall after a few replies, and changing TinyUSB, DMA mode, task cores or Espressif's own examples didn't help ([wiring.md](../wiring.md)).
 
 ## C5 control and the esptool bridge
 
