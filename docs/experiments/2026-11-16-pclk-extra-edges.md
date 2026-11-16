@@ -28,6 +28,7 @@ Why does p4vrx's colour come out 2x over-saturated, with hue jumps that change w
 - `passthru_lockout_top`: a C5 clock edge sets a clean clock only while armed. A 135 MHz count (from a PLL on the 27 MHz oscillator) clears it 22-30 ns after it rises and re-arms it 44-52 ns after, so at most one edge is taken per 75 ns period. Its rising edge comes straight from the C5's edge. The bus clock then read +8 to +36 ppm with static lanes, I/Q at gain 40, 52 and 60, and the busiest bits.
 - With it, decoding R4: line period 847.39 samples (847.41 nominal); sync-tip noise 93-156 kHz across clock places (150-1000 before); 74 lines with clicks in 30 s, about 0.04 a field (about 42 a field before); burst steady at 8855.
 - Side by side with p4usb (`img/2026-11-16-lockout-vs-p4usb.jpg`, p4vrx left): saturation 14.5 vs 15.6, row-to-row chroma jumps 3.6 vs 3.5, luma high-pass 4.41 vs 4.14. Before the lockout: 30.2 vs 15.2 and 13.6 vs 3.2.
+- With the lockout, scoring clock places by sync-tip noise alone left 0-22 click lines a field across 8 starts. Scoring by tip noise plus 10 per click line a field, and stopping at any place under 130: 10 of 10 starts settled at 93-117 kHz with 0.0-0.1 click lines a field.
 - The P4's GPIO glitch filter on PCLK at 20/16 ns or longer stops the capture; anything shorter is refused.
 
 ## Verdict

@@ -1927,35 +1927,39 @@ static bool start_on(const char *channel, bool force)
 }
 
 /* The decoder's own sync-tip noise over ms, in kHz rms, or -1 without enough locked lines. */
-static int tip_noise_khz(uint32_t ms)
+/* Sync-tip noise in kHz plus 10 for each line with a click a field, over ms; -1 with too few lines. Clicks
+ * come from lanes sampled on a transition, which the tip's noise alone hardly shows. */
+static int place_score(uint32_t ms)
 {
     s_noise_sq = 0;
     s_noise_lines = 0;
+    uint32_t clicks = s_click_lines, fields = s_fields;
     vTaskDelay(pdMS_TO_TICKS(ms));
-    if (s_noise_lines < 100) return -1;
+    if (s_noise_lines < 100 || s_fields == fields) return -1;
     float var = (float)s_noise_sq / ((float)s_noise_lines * (TIP_END - TIP_START) * (TIP_END - TIP_START - 1));
-    return (int)lrintf(sqrtf(var) * FS_HZ / 256000);
+    return (int)lrintf(sqrtf(var) * FS_HZ / 256000) + (int)(10 * (s_click_lines - clicks) / (s_fields - fields));
 }
 
-/* Slips the C5's clock while decoding until the sync-tip noise is near the lowest seen. The capture-side
- * placement in iq_start picks a clean-looking place, but decodes from it still split into 150-400 kHz and
- * 900-1000 kHz sessions, and the decoder's own noise tells them apart. */
+/* Slips the C5's clock while decoding until the score is near the lowest seen. The capture-side placement
+ * in iq_start picks a clean-looking place, but decodes from it still differ several times over in noise and
+ * clicks, and the decoder's own measures tell them apart. */
 static void place_by_noise(void)
 {
-    enum { TRIES = 24 };
+    /* About the best tip noise the link gives, with no clicks: no place is likely to beat it by much. */
+    enum { TRIES = 24, GOOD_SCORE = 130 };
     int best = INT32_MAX, seen[TRIES], n = 0;
     char reply[64];
     vTaskDelay(pdMS_TO_TICKS(500));
     for (; n < TRIES; ++n) {
-        int noise = tip_noise_khz(600);
-        seen[n] = noise;
-        if (noise >= 0 && noise < best) best = noise;
-        if (n >= 3 && noise >= 0 && noise <= best + best / 6 + 20) break;
+        int score = place_score(600);
+        seen[n] = score;
+        if (score >= 0 && score < best) best = score;
+        if (score >= 0 && (score <= GOOD_SCORE || (n >= 3 && score <= best + best / 6 + 20))) break;
         /* A lost reply usually means a late one, and the slip happened; the next reading says. */
         c5_request("clk slip 1", reply, sizeof reply, 2000);
         vTaskDelay(pdMS_TO_TICKS(300));
     }
-    say("sync tip noise by clock place (kHz):");
+    say("tip noise in kHz plus 10 a click line a field, by clock place:");
     for (int k = 0; k <= n && k < TRIES; ++k) say(" %d", seen[k]);
     say("\n");
 }
