@@ -38,3 +38,5 @@ With the UART run in the ribbon beside the bus lanes, it lost characters while t
 - `rake pins:check` runs the wiring check ([experiment](../experiments/2026-11-15-pin-mapping.md)).
 
 At 1 in 6, `iq_start` slips the C5's clock until a capture shows the fewest phase spikes, since the 40 MS/s probe's place doesn't carry over. `iq counter q|i [MHz]` runs the C5's counter on one lane group and counts repeats and skips through the Nano.
+
+At power-up the P4 starts decoding on the last channel started with `decode on`, kept in NVS (namespace `p4vrx`, key `channel`), or R4 if none.

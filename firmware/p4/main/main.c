@@ -6,6 +6,7 @@
 #include "bridge.h"
 #include "c5.h"
 #include "console.h"
+#include "decode.h"
 #include "pins.h"
 #include "usb.h"
 #include "uvc.h"
@@ -21,6 +22,7 @@ void app_main(void)
     video_init();
     uvc_init();
     usb_init();
+    decode_autostart();
     say("\np4vrx ready, type help\n> ");
 
     uint8_t buf[64];

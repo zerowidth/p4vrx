@@ -1,6 +1,6 @@
 idf_component_register(SRCS "main.c" "console.c" "usb.c" "c5.c" "bridge.c" "pins.c" "iq.c" "still.c" "decode.c" "video.c" "uvc.c" "overlay.c"
                             "demod.S" "chroma.S" "deint.S" "despeck.S" "jumps.S" "luma.S" "tnr.S" "yuv420.S"
-                       PRIV_REQUIRES esp_driver_gpio esp_driver_uart esp_driver_parlio esp_driver_bitscrambler esp_driver_dma esp_hal_dma esp_mm esp_timer esp_hw_support esp_app_format
+                       PRIV_REQUIRES esp_driver_gpio esp_driver_uart esp_driver_parlio esp_driver_bitscrambler esp_driver_dma esp_hal_dma esp_mm esp_timer esp_hw_support esp_app_format nvs_flash
                                      espressif__tinyusb espressif__esp_h264)
 
 # TinyUSB reads its configuration from tusb_config.h on its own include path.

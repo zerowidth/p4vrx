@@ -21,6 +21,8 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "nvs.h"
+#include "nvs_flash.h"
 #include "soc/axi_dma_struct.h"
 
 #include "c5.h"
@@ -1818,7 +1820,7 @@ static bool start(const char *channel, bool force)
     return probed;
 }
 
-static char s_channel[8] = "R3";
+static char s_channel[8] = "R4";
 static unsigned s_mhz;
 
 static void status(void)
@@ -2056,11 +2058,50 @@ bool decode_survey(const char *const *channels, int n, int8_t *levels, bool (*st
     return all;
 }
 
+/* The channel last started by hand, for the next power-up. */
+static void save_channel(void)
+{
+    nvs_handle_t nvs;
+    if (nvs_open("p4vrx", NVS_READWRITE, &nvs) != ESP_OK) return;
+    nvs_set_str(nvs, "channel", s_channel);
+    nvs_commit(nvs);
+    nvs_close(nvs);
+}
+
+static void autostart_task(void *arg)
+{
+    nvs_handle_t nvs;
+    if (nvs_open("p4vrx", NVS_READONLY, &nvs) == ESP_OK) {
+        size_t len = sizeof s_channel;
+        char saved[sizeof s_channel];
+        if (nvs_get_str(nvs, "channel", saved, &len) == ESP_OK) strlcpy(s_channel, saved, sizeof s_channel);
+        nvs_close(nvs);
+    }
+    say("decode: starting on %s\n", s_channel);
+    if (decode_start(NULL)) place_by_noise();
+    vTaskDelete(NULL);
+}
+
+/* Starts decoding at power-up on the last channel started by hand, on a task of its own so the console
+ * answers meanwhile. */
+void decode_autostart(void)
+{
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        nvs_flash_erase();
+        nvs_flash_init();
+    }
+    xTaskCreate(autostart_task, "autostart", 8192, NULL, 5, NULL);
+}
+
 void decode_command(int argc, char **argv)
 {
     const char *sub = argc > 1 ? argv[1] : "";
     if (strcmp(sub, "on") == 0) {
-        if (decode_start(argc > 2 ? argv[2] : NULL)) place_by_noise();
+        if (decode_start(argc > 2 ? argv[2] : NULL)) {
+            save_channel();
+            place_by_noise();
+        }
     } else if (strcmp(sub, "place") == 0) {
         place_by_noise();
     } else if (strcmp(sub, "off") == 0) {
