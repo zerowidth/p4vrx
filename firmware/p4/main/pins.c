@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "driver/gpio.h"
+#include "driver/gpio_filter.h"
 #include "esp_ldo_regulator.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -66,6 +67,27 @@ void bus_enable(bool on)
     gpio_set_direction(irq->pin, on ? GPIO_MODE_INPUT_OUTPUT : GPIO_MODE_INPUT);
 }
 
+static gpio_glitch_filter_handle_t s_pclk_filter;
+
+/* Ignores pulses on PCLK shorter than thres_ns within a window_ns sample window; 0 turns it off. */
+static esp_err_t pclk_filter(uint32_t window_ns, uint32_t thres_ns)
+{
+    if (s_pclk_filter) {
+        gpio_glitch_filter_disable(s_pclk_filter);
+        gpio_del_glitch_filter(s_pclk_filter);
+        s_pclk_filter = NULL;
+    }
+    if (!window_ns) return ESP_OK;
+    const gpio_flex_glitch_filter_config_t cfg = {
+        .clk_src = GLITCH_FILTER_CLK_SRC_DEFAULT,
+        .gpio_num = s_pins[0].pin,
+        .window_width_ns = window_ns,
+        .window_thres_ns = thres_ns,
+    };
+    esp_err_t err = gpio_new_flex_glitch_filter(&cfg, &s_pclk_filter);
+    return err == ESP_OK ? gpio_glitch_filter_enable(s_pclk_filter) : err;
+}
+
 void pins_init(void)
 {
     /* GPIO 39-48 run from LDO channel 4, the board's SD card IO supply; without it their high is too low
@@ -89,6 +111,9 @@ void pins_command(int argc, char **argv)
     } else if (strcmp(sub, "release") == 0) {
         pins_init();
         say("ok\n");
+    } else if (strcmp(sub, "pclkfilter") == 0 && argc > 2) {
+        esp_err_t err = pclk_filter(strtoul(argv[2], NULL, 0), argc > 3 ? strtoul(argv[3], NULL, 0) : strtoul(argv[2], NULL, 0));
+        say(err == ESP_OK ? "ok\n" : "err %s\n", esp_err_to_name(err));
     } else if (strcmp(sub, "bus") == 0 && argc > 2) {
         bus_enable(strcmp(argv[2], "on") == 0);
         say("ok\n");

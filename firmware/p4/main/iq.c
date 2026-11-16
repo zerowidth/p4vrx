@@ -613,6 +613,46 @@ void iq_set_edge(parlio_sample_edge_t edge)
     s_edge = edge;
 }
 
+/* Counts how often a lane's 7-bit counter (the C5's `link` pattern) steps by other than one: a repeat is a
+ * spurious clock edge on the way, a skip a missed one. */
+static void counter_test(char side, int mhz, size_t samples)
+{
+    char cmd[24], reply[96];
+    if (!c5_run_c5rx(5000)) {
+        say("iq: c5rx did not start\n");
+        return;
+    }
+    snprintf(cmd, sizeof cmd, "link %c %d", side, mhz);
+    if (!c5_request(cmd, reply, sizeof reply, 2000)) {
+        say("iq: %s: %s\n", cmd, reply);
+        return;
+    }
+    bus_enable(true);
+    s_every = 80 / mhz;
+    vTaskDelay(pdMS_TO_TICKS(20));
+    int shift = side == 'q' ? 9 : 1;
+    const parlio_sample_edge_t edges[] = {PARLIO_SAMPLE_EDGE_POS, PARLIO_SAMPLE_EDGE_NEG};
+    for (int e = 0; e < 2; ++e) {
+        if (capture(s_psram, samples, edges[e]) != ESP_OK) {
+            say("iq: capture failed\n");
+            break;
+        }
+        uint32_t repeats = 0, skips = 0, other = 0;
+        uint8_t prev = (s_buf[STALE] >> shift) & 0x7f;
+        for (size_t n = STALE + 1; n < samples; ++n) {
+            uint8_t v = (s_buf[n] >> shift) & 0x7f, step = (v - prev) & 0x7f;
+            repeats += step == 0;
+            skips += step == 2;
+            other += step != 0 && step != 1 && step != 2;
+            prev = v;
+        }
+        say("counter on %c at %d MHz, %s edge, %u samples: %lu repeats, %lu skips, %lu other\n", side, mhz,
+            e ? "falling" : "rising", (unsigned)(samples - STALE - 1), (unsigned long)repeats, (unsigned long)skips,
+            (unsigned long)other);
+    }
+    c5_request("link off", reply, sizeof reply, 1000);
+}
+
 void iq_command(int argc, char **argv)
 {
     if (!prepare()) return;
@@ -621,6 +661,9 @@ void iq_command(int argc, char **argv)
     if (strcmp(sub, "dump") != 0) decode_stop();
     if (strcmp(sub, "start") == 0) {
         iq_start(argc > 2 ? argv[2] : "R4", argc > 3 ? atoi(argv[3]) : 2);
+    } else if (strcmp(sub, "counter") == 0) {
+        counter_test(argc > 2 && argv[2][0] == 'i' ? 'i' : 'q', argc > 3 ? atoi(argv[3]) : 13,
+                     argc > 4 ? strtoul(argv[4], NULL, 0) : GAIN_SAMPLES + 262144);
     } else if (strcmp(sub, "edge") == 0) {
         bool clean;
         pick_edge(&clean);
@@ -633,6 +676,6 @@ void iq_command(int argc, char **argv)
         if (err == ESP_OK) stats();
         else say("iq: capture failed, %s\n", esp_err_to_name(err));
     } else {
-        say("iq [samples] | start [channel [every]] | edge | dump\n");
+        say("iq [samples] | start [channel [every]] | edge | counter q|i [MHz [samples]] | dump\n");
     }
 }

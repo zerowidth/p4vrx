@@ -15,6 +15,7 @@
 #include "nvs_flash.h"
 
 #include "lanes.h"
+#include "link.h"
 #include "radio.h"
 
 /* Waveshare C5-Zero antenna switch: low selects the on-board antenna, high the U.FL. */
@@ -82,6 +83,14 @@ static void run_command(char *line)
 
     if (strcmp(argv[0], "ping") == 0) {
         reply("ok c5rx");
+    } else if (strcmp(argv[0], "link") == 0 && argc == 2 && strcmp(argv[1], "off") == 0) {
+        link_stop();
+        reply("ok link off");
+    } else if (strcmp(argv[0], "link") == 0 && argc == 3) {
+        radio_iq_stop();
+        esp_err_t err = link_start(argv[1][0], (uint32_t)atoi(argv[2]) * 1000000u);
+        if (err == ESP_OK) reply("ok link %s", argv[1]);
+        else reply("err %s", esp_err_to_name(err));
     } else if (strcmp(argv[0], "tune") == 0 && argc == 2) {
         esp_err_t err = radio_tune(argv[1]);
         if (err == ESP_OK) reply("ok tune %s %u", radio_channel(), radio_mhz());
@@ -90,6 +99,7 @@ static void run_command(char *line)
         radio_set_gain((uint8_t)atoi(argv[1]));
         reply("ok gain %u", radio_gain());
     } else if (strcmp(argv[0], "iq") == 0 && (argc == 2 || argc == 3 || argc == 5) && strcmp(argv[1], "on") == 0) {
+        link_stop();
         int every = argc >= 3 ? atoi(argv[2]) : 2;
         int q_top = argc == 5 ? atoi(argv[3]) : 9, i_top = argc == 5 ? atoi(argv[4]) : 19;
         esp_err_t err = radio_iq_start(every, q_top, i_top);
