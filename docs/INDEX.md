@@ -17,6 +17,7 @@ experiment changes them; the ledger and experiment notes keep the history.
 | Panel UI, its fonts and the browser simulator | [topics/ui.md](topics/ui.md) |
 | Startup self-check: what it checks, what the Nano needs | [self-check.md](self-check.md) |
 | FM demod in the Nano: design, model results | [fpga-fm-demod.md](fpga-fm-demod.md) |
+| HDZero detector (cyclic prefix): design, model results | [fpga-cp-detect.md](fpga-cp-detect.md) |
 | Where the reference firmware came from | [../reference/PROVENANCE.md](../reference/PROVENANCE.md) |
 
 ## Elsewhere in `~/Documents/projects/fpv`
