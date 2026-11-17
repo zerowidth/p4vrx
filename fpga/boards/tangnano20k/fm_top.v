@@ -4,6 +4,10 @@
 //   0x0b 40 MHz PLL phase step, 0-15 (dynamic phase, 22.5 degrees a step)
 //   0x0c-0x0d 40 MHz PLL edges per ms (low byte first, holding the high byte)
 //   0x0e times the 40 MHz PLL lost lock, saturating at 255
+//   0x08 control bit 2: the lanes carry FM demod (14-bit frequency, 2.44 kHz an LSB) with PCLK from the 40 MHz
+//        clock divided by 3; bit 3: track the I/Q offsets rather than use 0x10-0x11
+//   0x10-0x11 I and Q offsets, signed, as the lanes read 2v+1; reads give the ones in use
+//   0x12-0x13 mean CORDIC magnitude over the last 32768 samples, low byte first (holding the high byte)
 // lockout_regs_top's description:
 // passthru_lockout_top with an I2C register file at 0x42 on the P4's touch bus, for the P4's self-check:
 //   0x00-0x01 "PV", 0x02 build
@@ -75,6 +79,51 @@ module fm_top #(
     reg [2:0] lock40_s = 0;
     reg [7:0] losses40 = 0;
 
+    // FM demod at the bus rate. The Nano makes PCLK as clk40 / 3 and changes the data as PCLK falls, a third
+    // of a period before the P4 samples on its rise, whatever the PLL's phase.
+    reg [13:0] lanes40 = 0;
+    always @(posedge clk40) lanes40 <= {c5_q, c5_i};
+    reg [1:0] third = 0;
+    reg pclk_fm = 0;
+    always @(posedge clk40) begin
+        third <= third == 2 ? 2'd0 : third + 1'd1;
+        pclk_fm <= third != 2;
+    end
+    reg signed [7:0] dc_i_set = 0, dc_q_set = 0, dc_i_auto = 0, dc_q_auto = 0;
+    reg [3:0] control40 = 0;
+    always @(posedge clk40) control40 <= control;
+    wire signed [7:0] dc_i = control40[3] ? dc_i_auto : dc_i_set;
+    wire signed [7:0] dc_q = control40[3] ? dc_q_auto : dc_q_set;
+    wire signed [13:0] fm_out;
+    wire [8:0] magnitude;
+    fm_demod demod (
+        .clk(clk40), .in_i(lanes40[6:0]), .in_q(lanes40[13:7]), .dc_i(dc_i), .dc_q(dc_q),
+        .take(third == 1), .out(fm_out), .magnitude(magnitude)
+    );
+    // Offsets: the mean of each lane, as 2v+1, over 65536 samples. Magnitude: the mean over 32768.
+    reg [15:0] tally = 0;
+    reg signed [23:0] sum_i = 0, sum_q = 0;
+    reg [23:0] sum_mag = 0;
+    reg [8:0] mean_mag = 0;
+    always @(posedge clk40) begin
+        tally <= tally + 1'd1;
+        if (tally == 16'hffff) begin
+            dc_i_auto <= (sum_i + $signed({1'b0, lanes40[6:0], 1'b1}) + 24'sd32768) >>> 16;
+            dc_q_auto <= (sum_q + $signed({1'b0, lanes40[13:7], 1'b1}) + 24'sd32768) >>> 16;
+            sum_i <= 0;
+            sum_q <= 0;
+        end else begin
+            sum_i <= sum_i + $signed({lanes40[6:0], 1'b1});
+            sum_q <= sum_q + $signed({lanes40[13:7], 1'b1});
+        end
+        if (tally[14:0] == 15'h7fff) begin
+            mean_mag <= (sum_mag + magnitude) >> 15;
+            sum_mag <= 0;
+        end else begin
+            sum_mag <= sum_mag + magnitude;
+        end
+    end
+
     // Edges counted in their own clocks as Gray codes, which cross into clk_27m one bit change at a time.
     reg [15:0] taken = 0, seen = 0;
     always @(posedge q) taken <= taken + 1'd1;
@@ -122,7 +171,7 @@ module fm_top #(
     wire [7:0] reg_addr, wr_data;
     wire wr, rd;
     reg [7:0] rd_data;
-    reg [1:0] control = 0;
+    reg [3:0] control = 0;
     reg [13:0] pattern = 0;
     reg [7:0] held = 0;
 
@@ -142,13 +191,17 @@ module fm_top #(
             8'h05: rd_data = held;
             8'h06: rd_data = seen_per_ms[7:0];
             8'h07: rd_data = held;
-            8'h08: rd_data = {6'd0, control};
+            8'h08: rd_data = {4'd0, control};
             8'h09: rd_data = pattern[7:0];
             8'h0a: rd_data = {2'd0, pattern[13:8]};
             8'h0b: rd_data = {4'd0, phase40};
             8'h0c: rd_data = count40_per_ms[7:0];
             8'h0d: rd_data = held;
             8'h0e: rd_data = losses40;
+            8'h10: rd_data = dc_i;
+            8'h11: rd_data = dc_q;
+            8'h12: rd_data = mean_mag[7:0];
+            8'h13: rd_data = held;
             default: rd_data = 8'h00;
         endcase
     end
@@ -158,15 +211,20 @@ module fm_top #(
         if (rd && reg_addr == 8'h06) held <= seen_per_ms[15:8];
         if (rd && reg_addr == 8'h0c) held <= count40_per_ms[15:8];
         if (wr && reg_addr == 8'h0b) phase40 <= wr_data[3:0];
-        if (wr && reg_addr == 8'h08) control <= wr_data[1:0];
+        if (wr && reg_addr == 8'h08) control <= wr_data[3:0];
+        if (wr && reg_addr == 8'h10) dc_i_set <= wr_data;
+        if (wr && reg_addr == 8'h11) dc_q_set <= wr_data;
+        if (rd && reg_addr == 8'h12) held <= {7'd0, mean_mag[8]};
         if (wr && reg_addr == 8'h09) pattern[7:0] <= wr_data;
         if (wr && reg_addr == 8'h0a) pattern[13:8] <= wr_data[5:0];
     end
 
     // The P4 samples on PCLK's rising edge, the clean clock's falling one, half a period on.
+    // Pattern mode wins over FM, which wins over the raw lanes.
     wire own_clock = control[1];
-    wire drive = own_clock ? en27[1] : en[1];
-    assign p4_pclk = drive ? (own_clock ? ~half : ~q) : 1'bz;
-    assign p4_d    = drive ? (control[0] ? pattern : lanes) : 14'bz;
+    wire fm = control[2] && !control[0];
+    wire drive = own_clock || fm ? en27[1] : en[1];
+    assign p4_pclk = drive ? (own_clock ? ~half : fm ? pclk_fm : ~q) : 1'bz;
+    assign p4_d    = drive ? (control[0] ? pattern : fm ? fm_out : lanes) : 14'bz;
 
 endmodule

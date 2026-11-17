@@ -2,7 +2,7 @@
 
 The Nano takes the C5's I/Q at 40 MS/s, demodulates it, and sends the P4 frequency samples at 13.33 MS/s on the same 14-lane bus. The P4 keeps its decoder from the composite onward and drops its phase lookup, difference and despeck. Pass-through stays selectable, so the current path keeps working and the no-FPGA build is unchanged.
 
-Status: design, fixed-point model (`models/fm_demod.py`), and the 40 MHz PLL proven on hardware (`fpga/boards/tangnano20k/fm_top.v`, SRAM only). No demod RTL yet.
+Status: design, fixed-point model (`models/fm_demod.py`), and the 40 MHz PLL proven on hardware (`fpga/boards/tangnano20k/fm_top.v`, SRAM only). Demod RTL (`fpga/rtl/fm_demod.v`) matches the model bit for bit in iverilog on three captures (`models/fm_demod_check.py`, 9,880-39,880 outputs each), and is wired into `fm_top` behind control bit 2: 14% of LUT4s, 7% of flops, 11 multipliers, the 40 MHz domain closing at 73 MHz. Not yet run on hardware.
 
 PLL test, 2026-11-17: `fm_top` is `lockout_regs_top` plus a PLL taking the lockout's clean clock ×3, with its lock, edges per ms and lock losses in I2C registers (`nano read`). Decoding R4 it held lock at 40,000 edges/ms for 60 s while the lockout took 13,333 C5 clock edges/ms of 13,353-13,367 seen. On dead R2 at gain 77, the noisiest case for the lanes, it held for 30 s with 13,777-13,844 seen: no lock lost after the 6 at boot, when the P4 resets the C5. The 2026-11-16 PLL bitstream, fed the raw C5 clock, lost lock.
 
@@ -33,7 +33,7 @@ Taps: −1 −6 −15 −11 36 133 236 280 236 133 36 −11 −15 −6 −1.
 
 ## On the bus
 
-- The same 14 lanes and PCLK. PCLK stays the clean C5 clock at 13.33 MHz, and the output word changes on the 40 MHz edge that matches PCLK's falling edge, a half period before the P4 samples on its rising edge.
+- The same 14 lanes and PCLK. In fm mode the Nano makes PCLK as the 40 MHz clock divided by 3, high for two of its periods, and changes the word as PCLK falls: 25 ns before the P4 samples on the rise and 50 ns after. That holds whatever the PLL's phase, which only places the lane sampling. The rate stays 13.33 MS/s, locked to the C5.
 - Control register 0x08 bit 2 chooses the demodulated words over the raw lanes. Pattern mode (bit 0) still wins, so the self-check is unchanged.
 - New registers: the offsets in use, the mean magnitude per ms (the P4's gain loop reads I/Q RMS from the raw lanes today), the PLL's phase step and lock, and phase jumps per ms.
 
