@@ -2,6 +2,7 @@
 // Adapted from C5VRX p4usb (reference/p4usb/main/c5.c), by Twotoz and the C5VRX contributors.
 #include "c5.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "driver/gpio.h"
@@ -40,17 +41,29 @@ static void open_drain_released(int pin)
     gpio_set_direction(pin, GPIO_MODE_INPUT_OUTPUT_OD);
 }
 
+/* Noise on the UART can put stray characters ahead of a reply, so a reply is found where it starts in the line. */
+static const char *reply_start(const char *line)
+{
+    if (strncmp(line, "ok", 2) == 0 || strncmp(line, "err", 3) == 0) return line;
+    const char *ok = strstr(line, "ok "), *err = strstr(line, "err ");
+    return ok && (!err || ok < err) ? ok : err;
+}
+
 static void on_line(const char *line)
 {
-    if (strcmp(line, "c5rx ready") == 0) {
+    const char *reply;
+    if (strstr(line, "c5rx ready")) {
         c5_tx_attach();
         s_c5rx = true;
         xSemaphoreGive(s_ready);
-    } else if (strncmp(line, "ok", 2) == 0 || strncmp(line, "err", 3) == 0) {
-        strlcpy(s_reply_line, line, sizeof s_reply_line);
+    } else if ((reply = reply_start(line))) {
+        strlcpy(s_reply_line, reply, sizeof s_reply_line);
         xSemaphoreGive(s_reply);
     }
 }
+
+/* What the C5's UART brought in: lines, bytes that weren't printable, and lines that weren't a reply or c5rx's banner. */
+static uint32_t s_rx_lines, s_rx_junk, s_rx_other;
 
 static void split_lines(const uint8_t *buf, size_t n)
 {
@@ -59,10 +72,16 @@ static void split_lines(const uint8_t *buf, size_t n)
     for (size_t i = 0; i < n; ++i) {
         if (buf[i] == '\n' || buf[i] == '\r') {
             line[len] = '\0';
-            if (len > 0) on_line(line);
+            if (len > 0) {
+                ++s_rx_lines;
+                if (!strstr(line, "ok ") && !strstr(line, "err") && !strstr(line, "c5rx")) ++s_rx_other;
+                on_line(line);
+            }
             len = 0;
         } else if (buf[i] >= 0x20 && buf[i] < 0x7f && len < sizeof line - 1) {
             line[len++] = (char)buf[i];
+        } else if (buf[i] < 0x20 || buf[i] >= 0x7f) {
+            ++s_rx_junk;
         }
     }
 }
@@ -100,6 +119,9 @@ void c5_init(void)
     ESP_ERROR_CHECK(uart_driver_install(C5_UART, 4096, 0, 0, NULL, 0));
     ESP_ERROR_CHECK(uart_param_config(C5_UART, &cfg));
     ESP_ERROR_CHECK(uart_set_pin(C5_UART, UART_PIN_NO_CHANGE, PIN_C5_RX, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+    /* As on the C5: if lane noise keeps the line from going idle, the idle timeout never fires and a short reply
+     * waits in the FIFO for 120 bytes. */
+    ESP_ERROR_CHECK(uart_set_rx_full_threshold(C5_UART, 1));
     /* Keeps the line idle rather than floating while the C5 is in reset. */
     gpio_pullup_en(PIN_C5_RX);
     s_ready = xSemaphoreCreateBinary();
@@ -143,8 +165,15 @@ bool c5_request(const char *cmd, char *reply, size_t reply_len, uint32_t timeout
      * each exchange, a few milliseconds. */
     bool bus = s_pause_bus && bus_enabled();
     if (bus) bus_enable(false);
-    uart_write_bytes(C5_UART, cmd, strlen(cmd));
+    /* A newline first ends any noise the C5 has picked up since the last request, and a check byte lets the C5
+     * refuse a command that noise changed into another one. */
+    uint8_t check = 0;
+    for (const char *p = cmd; *p; ++p) check ^= (uint8_t)*p;
+    char tail[8];
+    snprintf(tail, sizeof tail, " #%02x\n", check);
     uart_write_bytes(C5_UART, "\n", 1);
+    uart_write_bytes(C5_UART, cmd, strlen(cmd));
+    uart_write_bytes(C5_UART, tail, strlen(tail));
     /* A reply that came after an earlier request gave up names that request's command; skip it. */
     const char *name = strncmp(cmd, "ping", 4) == 0 ? "c5rx" : cmd;
     size_t word = strcspn(name, " ");
@@ -210,10 +239,16 @@ static void c5_pins(void)
     say("RX edges in 20 ms: %d\n", edges);
 }
 
+static uint32_t s_send_ms = 500;
+
 void c5_command(int argc, char **argv)
 {
     const char *sub = argc > 1 ? argv[1] : "";
-    if (strcmp(sub, "hold") == 0) {
+    if (strcmp(sub, "uart") == 0) {
+        say("from the C5: %lu lines, %lu not replies, %lu bytes not printable\n", (unsigned long)s_rx_lines,
+            (unsigned long)s_rx_other, (unsigned long)s_rx_junk);
+        return;
+    } else if (strcmp(sub, "hold") == 0) {
         c5_hold();
     } else if (strcmp(sub, "reset") == 0) {
         c5_run();
@@ -236,9 +271,14 @@ void c5_command(int argc, char **argv)
             strlcat(cmd, argv[i], sizeof cmd);
         }
         char reply[96];
-        /* Starting the radio takes about a second. */
-        c5_request(cmd, reply, sizeof reply, 5000);
-        say("%s\n", reply);
+        int64_t t0 = esp_timer_get_time();
+        c5_request(cmd, reply, sizeof reply, s_send_ms);
+        say("%s (%lld ms)\n", reply, (esp_timer_get_time() - t0) / 1000);
+        return;
+    } else if (strcmp(sub, "wait") == 0 && argc > 2) {
+        /* How long `c5 send` waits for a reply. */
+        s_send_ms = atoi(argv[2]);
+        say("ok\n");
         return;
     } else {
         say("c5 hold | reset | start | boot | pins | log on|off | send <command>\n");

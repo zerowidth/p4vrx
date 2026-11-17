@@ -12,6 +12,8 @@ The high-speed USB console works once header Pi pins 26/28, J3 25/27 (the high-s
 
 The C5's UART is on P4 50 (TX) and 51 (RX); EN on 34 and BOOT on 35 are open-drain and released at boot. P4 TX stays an undriven input except during a bridge session, and UART1 only listens to the C5 during a session or `c5 log on`.
 
+With I/Q running, noise from the lanes reaches both ends of the C5 UART. It keeps the line from going idle, so both UARTs interrupt on every byte (RX full threshold 1) rather than waiting for 120 bytes or an idle gap. It also changes command characters, so `c5_request` appends ` #hh`, the XOR of the command's bytes, and c5rx answers `err check` to any line without a matching one ([experiment](../experiments/2026-11-17-c5-uart-stall.md)).
+
 esptool on a console port with `--before no-reset` reaches the C5: the P4 sees esptool's SYNC, resets the C5 into download mode and relays both ways, following esptool's baud change. DTR/RTS on the USB console reboot the P4 itself into its ROM loader, for P4 flashing.
 
 ## IO supply

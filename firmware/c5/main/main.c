@@ -69,6 +69,9 @@ static const char *antenna_name(void)
     return s_external ? "ext" : "int";
 }
 
+static int64_t s_line_at_us;
+static uint32_t s_slowest_reply_us;
+
 static void reply(const char *fmt, ...)
 {
     va_list ap;
@@ -77,16 +80,59 @@ static void reply(const char *fmt, ...)
     va_end(ap);
     printf("\n");
     fflush(stdout);
+    uint32_t took = (uint32_t)(esp_timer_get_time() - s_line_at_us);
+    if (took > s_slowest_reply_us) s_slowest_reply_us = took;
 }
+
+static uint32_t *s_uart_lines, *s_uart_junk;
+static uint32_t s_pings;
+/* Spare CPU: a lowest-priority task's loops in the last second, and the slowest line-to-reply time. */
+static volatile uint32_t s_spin, s_spin_per_s;
+
+static void spin_task(void *arg)
+{
+    int64_t window = esp_timer_get_time();
+    for (;;) {
+        ++s_spin;
+        if (esp_timer_get_time() - window >= 1000000) {
+            s_spin_per_s = s_spin;
+            s_spin = 0;
+            window = esp_timer_get_time();
+        }
+    }
+}
+
+/* Strips the P4's " #hh" check byte, the XOR of the command's bytes; false if it's missing or wrong. */
+static bool checked(char *line)
+{
+    char *mark = strrchr(line, '#');
+    if (!mark || mark == line || mark[-1] != ' ' || strlen(mark) != 3) return false;
+    char *end;
+    unsigned long want = strtoul(mark + 1, &end, 16);
+    if (*end) return false;
+    mark[-1] = '\0';
+    uint8_t check = 0;
+    for (const char *p = line; *p; ++p) check ^= (uint8_t)*p;
+    return check == want;
+}
+
+static uint32_t s_bad_lines;
 
 static void run_command(char *line)
 {
+    if (!*line) return;
+    if (!checked(line)) {
+        ++s_bad_lines;
+        reply("err check");
+        return;
+    }
     char *argv[52];
     int argc = 0;
     for (char *tok = strtok(line, " "); tok && argc < 52; tok = strtok(NULL, " ")) argv[argc++] = tok;
     if (argc == 0) return;
 
     if (strcmp(argv[0], "ping") == 0) {
+        ++s_pings;
         reply("ok c5rx");
     } else if (strcmp(argv[0], "link") == 0 && argc == 2 && strcmp(argv[1], "off") == 0) {
         link_stop();
@@ -147,6 +193,10 @@ static void run_command(char *line)
         uint32_t a0, a1, b0, b1;
         radio_hop_time((uint16_t)atoi(argv[1]), argc > 2 ? atoi(argv[2]) : 20, argc > 3 ? atoi(argv[3]) : 0, &a0, &a1, &b0, &b1);
         reply("ok hoptime out %lu-%lu back %lu-%lu us", (unsigned long)a0, (unsigned long)a1, (unsigned long)b0, (unsigned long)b1);
+    } else if (strcmp(argv[0], "uart") == 0) {
+        reply("ok uart lines=%lu junk=%lu pings=%lu bad=%lu spare=%lu slowest=%luus", (unsigned long)*s_uart_lines, (unsigned long)*s_uart_junk,
+              (unsigned long)s_pings, (unsigned long)s_bad_lines, (unsigned long)s_spin_per_s, (unsigned long)s_slowest_reply_us);
+        s_slowest_reply_us = 0;
     } else if (strcmp(argv[0], "renew") == 0) {
         reply(sweep_renew() ? "ok renew" : "err renew: no scan");
     } else if (strcmp(argv[0], "sweep") == 0) {
@@ -173,20 +223,31 @@ void app_main(void)
     antenna_load();
 
     ESP_ERROR_CHECK(uart_driver_install(CONSOLE_UART, 256, 0, 0, NULL, 0));
+    /* Lane noise keeps the line from going idle, so the idle timeout never fires and a command would wait in
+     * the FIFO for 120 bytes; take every byte as it comes. */
+    ESP_ERROR_CHECK(uart_set_rx_full_threshold(CONSOLE_UART, 1));
+    xTaskCreate(spin_task, "spin", 2048, NULL, tskIDLE_PRIORITY, NULL);
     lanes_drive_low();
     printf("c5rx ready\n");
 
     char line[200];
     size_t len = 0;
+    /* The UART picks up bytes from the lanes beside it, most of them not printable; those are skipped. */
+    static uint32_t lines, junk;
+    s_uart_lines = &lines, s_uart_junk = &junk;
     for (;;) {
         uint8_t c;
         if (uart_read_bytes(CONSOLE_UART, &c, 1, portMAX_DELAY) != 1) continue;
         if (c == '\n' || c == '\r') {
             line[len] = '\0';
-            len = 0;
+            if (len) ++lines;
+            s_line_at_us = esp_timer_get_time();
             run_command(line);
-        } else if (len < sizeof line - 1) {
+            len = 0;
+        } else if (c >= 0x20 && c <= 0x7e && len < sizeof line - 1) {
             line[len++] = (char)c;
+        } else if (c < 0x20 || c > 0x7e) {
+            ++junk;
         }
     }
 }

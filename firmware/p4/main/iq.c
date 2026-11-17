@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "driver/parlio_rx.h"
 #include "esp_private/gdma_link.h"
@@ -491,12 +492,28 @@ bool iq_retune(const char *channel)
 {
     char cmd[24], reply[96];
     snprintf(cmd, sizeof cmd, "tune %s", channel);
-    if (!c5_request(cmd, reply, sizeof reply, 5000)) {
-        say("iq: %s: %s\n", cmd, reply);
-        return false;
+    /* A retune answers in about 10 ms; a lost reply is asked again rather than waited out. */
+    bool ok = false;
+    for (int tries = 0; tries < 3 && !ok; ++tries) ok = c5_request(cmd, reply, sizeof reply, 300);
+    if (ok) {
+        note_tune(reply, channel);
+        return true;
     }
-    note_tune(reply, channel);
-    return true;
+    /* All the replies lost doesn't mean the tune was: the C5's status says where it is. */
+    for (int tries = 0; tries < 3; ++tries) {
+        unsigned mhz;
+        char ch[8];
+        if (!c5_request("status", reply, sizeof reply, 300)) continue;
+        const char *at = strstr(reply, "ch=");
+        if (at && sscanf(at, "ch=%7s freq=%u", ch, &mhz) == 2) {
+            strlcpy(s_tuned, ch, sizeof s_tuned);
+            s_mhz = mhz;
+            say("iq: %s: no reply, but the C5 is on %s\n", cmd, ch);
+            return strcasecmp(ch, channel) == 0;
+        }
+    }
+    say("iq: %s: %s\n", cmd, reply);
+    return false;
 }
 
 /* The probe's rate, at which the receive filter leaves the top of the band empty. */
