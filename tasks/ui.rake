@@ -1,7 +1,11 @@
 # The P4's bitmap fonts, baked from Inter (SIL OFL 1.1) as `brew install --cask font-inter` installs it.
 INTER = ENV["INTER_TTF"] ||
         Dir["/opt/homebrew/Caskroom/font-inter/*/extras/ttf/Inter-SemiBold.ttf"].max_by { |p| Gem::Version.new(p[%r{font-inter/([^/]+)/}, 1]) rescue Gem::Version.new("0") }
-UI_SOURCES = %w[ui/src/ui.c ui/src/canvas.c ui/fonts/inter.c ui/sim/sim.c ui/sim/libc.c].freeze
+# Font Awesome Free as `brew install --cask font-fontawesome` installs it (the desktop release's folder).
+FONTAWESOME = ENV["FONTAWESOME_DIR"] ||
+              Dir["/opt/homebrew/Caskroom/font-fontawesome/*/fontawesome-free-*-desktop"].max_by { |p| Gem::Version.new(p[%r{font-fontawesome/([^/]+)/}, 1]) rescue Gem::Version.new("0") }
+UI_ICONS = %w[brands/usb desktop slash hand-pointer circle sd-card bars table-cells grip].join(",")
+UI_SOURCES = %w[ui/src/ui.c ui/src/canvas.c ui/fonts/inter.c ui/fonts/icons.c ui/sim/sim.c ui/sim/libc.c].freeze
 UI_WASM = "ui/build/ui.wasm"
 UI_PORT = ENV.fetch("PORT", "8790")
 
@@ -26,11 +30,14 @@ def check_ui_toolchain
 end
 
 namespace :ui do
-  desc "Bake ui/fonts/inter.c from Inter SemiBold (INTER_TTF=path to use another file)"
+  desc "Bake ui/fonts/inter.c from Inter SemiBold and ui/fonts/icons.c from Font Awesome (INTER_TTF=, FONTAWESOME_DIR=)"
   task :fonts do
     abort "no Inter-SemiBold.ttf: brew install --cask font-inter, or set INTER_TTF" unless INTER && File.file?(INTER)
     sh "uv", "run", "-q", "--with", "freetype-py", "ui/fonts/bake.py", INTER, "ui/fonts/inter.c",
        "font_small:20", "font_medium:36", "font_large:80: 0123456789ABEFLRXabefhlrx-"
+    abort "no Font Awesome: brew install --cask font-fontawesome, or set FONTAWESOME_DIR" unless FONTAWESOME && File.directory?(FONTAWESOME)
+    sh "uv", "run", "-q", "--with", "freetype-py", "ui/fonts/bake.py", "icons", FONTAWESOME, "ui/fonts/icons.c", UI_ICONS,
+       "icons_24:24", "icons_36:36"
   end
 
   desc "Build #{UI_WASM}, the UI for the browser simulator"
@@ -40,7 +47,7 @@ namespace :ui do
     objects = UI_SOURCES.map do |src|
       obj = "ui/build/#{File.basename(src, ".c")}.o"
       sh UI_CLANG, "--target=wasm32", "-O2", "-ffreestanding", "-fno-builtin", "-nostdlib", "-Wall",
-         "-Iui/src", "-c", src, "-o", obj, verbose: false
+         "-Iui/src", "-Iui/fonts", "-c", src, "-o", obj, verbose: false
       obj
     end
     sh(*wasm_ld, "--no-entry", "-o", UI_WASM, *objects, verbose: false)

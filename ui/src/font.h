@@ -19,3 +19,10 @@ typedef struct {
 } font_t;
 
 extern const font_t font_small, font_medium, font_large;
+
+/* Icons in cells of w by h pixels; a glyph's left and top place it from the cell's top-left corner. */
+typedef struct {
+    const font_glyph_t *glyphs;
+    const uint8_t *bits;
+    uint8_t w, h;
+} icon_set_t;
