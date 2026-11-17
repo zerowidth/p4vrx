@@ -16,6 +16,7 @@ experiment changes them; the ledger and experiment notes keep the history.
 | P4 firmware: console, C5 bridge, IO supply, wiring check | [topics/p4-firmware.md](topics/p4-firmware.md) |
 | Panel UI, its fonts and the browser simulator | [topics/ui.md](topics/ui.md) |
 | Startup self-check: what it checks, what the Nano needs | [self-check.md](self-check.md) |
+| FM demod in the Nano: design, model results | [fpga-fm-demod.md](fpga-fm-demod.md) |
 | Where the reference firmware came from | [../reference/PROVENANCE.md](../reference/PROVENANCE.md) |
 
 ## Elsewhere in `~/Documents/projects/fpv`
