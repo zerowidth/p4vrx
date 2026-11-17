@@ -85,3 +85,8 @@ const char *touch_status(void)
 {
     return s_status;
 }
+
+i2c_master_bus_handle_t touch_i2c_bus(void)
+{
+    return s_bus;
+}

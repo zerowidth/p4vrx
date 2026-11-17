@@ -15,6 +15,7 @@
 #include "console.h"
 #include "decode.h"
 #include "pins.h"
+#include "touch.h"
 
 #define LANES 14
 #define ALL_LANES 0x3fff
@@ -30,12 +31,15 @@ typedef struct {
     char detail[40];
 } check_t;
 
-enum { C5_LINK, C5_WIRES, BUS_OFF, PCLK, LANE_WALK, N_CHECKS };
+enum { C5_LINK, C5_WIRES, NANO, BUS_OFF, PCLK, LANE_WALK, NANO_WALK, N_CHECKS };
 
 static check_t s_checks[N_CHECKS] = {
-    {.name = "c5"}, {.name = "en/boot"}, {.name = "bus enable"}, {.name = "pclk"}, {.name = "lanes"},
+    {.name = "c5"},   {.name = "en/boot"}, {.name = "nano"},
+    {.name = "bus enable"}, {.name = "pclk"}, {.name = "lanes"}, {.name = "nano lanes"},
 };
 static bool s_ran;
+/* Bus-off checks that failed once and passed on a second look, since power-up. */
+static int s_retries;
 static int64_t s_took_us, s_at_us;
 
 static bool fail(int k, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
@@ -100,6 +104,59 @@ static bool walk(uint16_t pattern)
     return c5_say(cmd);
 }
 
+#define NANO_ADDR 0x42
+#define NANO_BUILD 0x01
+#define REG_ID 0x00
+#define REG_TAKEN 0x04
+#define REG_CONTROL 0x08
+#define CONTROL_PATTERN 1
+#define CONTROL_OWN_CLOCK 2
+
+static i2c_master_dev_handle_t s_nano;
+
+static bool nano_read(uint8_t reg, uint8_t *data, size_t n)
+{
+    return s_nano && i2c_master_transmit_receive(s_nano, &reg, 1, data, n, 20) == ESP_OK;
+}
+
+static bool nano_write(uint8_t reg, const uint8_t *data, size_t n)
+{
+    uint8_t buf[4] = {reg};
+    memcpy(buf + 1, data, n);
+    return s_nano && i2c_master_transmit(s_nano, buf, n + 1, 20) == ESP_OK;
+}
+
+/* C5 clock edges per ms the Nano took and saw, or false without the register file. */
+static bool nano_clock(int *taken, int *seen)
+{
+    uint8_t c[4];
+    if (!nano_read(REG_TAKEN, c, 4)) return false;
+    *taken = c[0] | c[1] << 8, *seen = c[2] | c[3] << 8;
+    return true;
+}
+
+static bool check_nano(void)
+{
+    i2c_master_bus_handle_t bus = touch_i2c_bus();
+    if (!bus) return fail(NANO, "no I2C bus");
+    if (!s_nano) {
+        const i2c_device_config_t dev = {.dev_addr_length = I2C_ADDR_BIT_LEN_7, .device_address = NANO_ADDR, .scl_speed_hz = 400000};
+        if (i2c_master_bus_add_device(bus, &dev, &s_nano) != ESP_OK) return fail(NANO, "can't add 0x42");
+    }
+    uint8_t id[4];
+    if (!nano_read(REG_ID, id, 4)) return fail(NANO, "no answer at 0x42 (old bitstream?)");
+    if (id[0] != 'P' || id[1] != 'V') return fail(NANO, "0x42 is not the Nano: %02x %02x", id[0], id[1]);
+    if (id[2] != NANO_BUILD) return fail(NANO, "Nano build %u, want %u", id[2], NANO_BUILD);
+    if (!(id[3] & 1)) return fail(NANO, "Nano PLL not locked");
+    return pass(NANO);
+}
+
+static bool nano_pattern(uint16_t pattern)
+{
+    const uint8_t p[2] = {pattern & 0xff, pattern >> 8};
+    return nano_write(0x09, p, 2);
+}
+
 static bool check_c5(void)
 {
     if (!c5_run_c5rx(2000)) return fail(C5_LINK, "c5rx did not start");
@@ -130,7 +187,14 @@ static bool check_bus_off(void)
         for (int lane = 0; lane < LANES && !stuck[0]; ++lane)
             if ((v ^ want) >> (13 - lane) & 1) snprintf(stuck, sizeof stuck, "%s driven %s", lane_name(lane), up ? "low" : "high");
     }
-    if (stuck[0]) return fail(BUS_OFF, "bus off but %s", stuck);
+    if (stuck[0]) {
+        uint8_t st = 0xff;
+        int taken = -1, seen = -1;
+        nano_read(0x03, &st, 1);
+        nano_clock(&taken, &seen);
+        say("selftest: bus off but %s; Nano status %02x, clock %d/%d per ms\n", stuck, st, taken, seen);
+        return fail(BUS_OFF, "%s; Nano %02x %d/%d", stuck, st, taken, seen);
+    }
     return pass(BUS_OFF);
 }
 
@@ -165,19 +229,23 @@ static bool check_pclk(void)
     bus_enable(true);
     vTaskDelay(1);
     int hz = pclk_hz();
-    if (hz < PCLK_MIN_HZ || hz > PCLK_MAX_HZ) return fail(PCLK, "PCLK at %d Hz", hz);
+    if (hz < PCLK_MIN_HZ || hz > PCLK_MAX_HZ) {
+        int taken, seen;
+        if (nano_clock(&taken, &seen)) return fail(PCLK, "PCLK %d Hz, Nano took %d/ms of %d", hz, taken, seen);
+        return fail(PCLK, "PCLK at %d Hz", hz);
+    }
     return pass(PCLK);
 }
 
 /* Walking ones read with pull-downs and walking zeros with pull-ups, so an open lane reads wrong in both. */
-static bool check_lanes(void)
+static bool check_lanes(int k_check, bool (*drive)(uint16_t))
 {
     uint16_t got[2][LANES];
     for (int zeros = 0; zeros < 2; ++zeros) {
         bus_pins_pull(zeros);
         for (int lane = 0; lane < LANES; ++lane) {
             uint16_t bit = 1u << (13 - lane), pattern = zeros ? ALL_LANES & ~bit : bit;
-            if (!walk(pattern)) return fail(LANE_WALK, "C5 did not take walk %04x", pattern);
+            if (!drive(pattern)) return fail(k_check, "pattern %04x not taken", pattern);
             esp_rom_delay_us(50);
             got[zeros][lane] = read_lanes();
         }
@@ -193,12 +261,12 @@ static bool check_lanes(void)
                 high += v, low += !v, wrong += v != want;
             }
         if (!wrong) continue;
-        if (!high) return fail(LANE_WALK, "%s stuck low", lane_name(lane));
-        if (!low) return fail(LANE_WALK, "%s stuck high", lane_name(lane));
+        if (!high) return fail(k_check, "%s stuck low", lane_name(lane));
+        if (!low) return fail(k_check, "%s stuck high", lane_name(lane));
         /* Reads that follow the pull rather than the pattern: an open wire. */
         bool open = true;
         for (int k = 0; k < LANES; ++k) open &= !(got[0][k] & bit) && (got[1][k] & bit);
-        if (open) return fail(LANE_WALK, "%s open", lane_name(lane));
+        if (open) return fail(k_check, "%s open", lane_name(lane));
         /* Reads that follow another lane's bit: crossed or shorted to it. */
         for (int other = 0; other < LANES; ++other) {
             if (other == lane) continue;
@@ -209,23 +277,42 @@ static bool check_lanes(void)
                     uint16_t pattern = zeros ? ALL_LANES & ~(1u << (13 - k)) : 1u << (13 - k);
                     follows &= !!(got[zeros][k] & bit) == !!(pattern & ob);
                 }
-            if (follows) return fail(LANE_WALK, "%s carries %s", lane_name(lane), lane_name(other));
+            if (follows) return fail(k_check, "%s carries %s", lane_name(lane), lane_name(other));
         }
-        return fail(LANE_WALK, "%s wrong in %d of 28", lane_name(lane), wrong);
+        return fail(k_check, "%s wrong in %d of 28", lane_name(lane), wrong);
     }
-    return pass(LANE_WALK);
+    return pass(k_check);
 }
 
 bool selftest_run(void)
 {
     int64_t t0 = esp_timer_get_time();
     for (int k = 0; k < N_CHECKS; ++k) s_checks[k].state = CHECK_SKIPPED, s_checks[k].detail[0] = '\0';
-    bool ok = check_c5() && check_wires();
-    if (ok) {
+    bool c5 = check_c5() && check_wires();
+    bool ok = check_nano() && c5;
+    if (c5) {
         /* The walk's clock first: the Nano's enable only changes on the C5's clock edges. */
         if (!walk(0)) ok = fail(BUS_OFF, "C5 did not start its clock");
-        else ok = check_bus_off() && check_pclk() && check_lanes();
+        else {
+            /* Twice the first run after a flash saw D10 driven with the bus off, and later runs passed; a
+             * second look 20 ms on rides over that, and the first's detail goes to the console. */
+            bool off = check_bus_off();
+            if (!off) {
+                vTaskDelay(pdMS_TO_TICKS(20));
+                off = check_bus_off();
+                s_retries += off;
+            }
+            ok = off && check_pclk() && check_lanes(LANE_WALK, walk);
+        }
         c5_say("walk off");
+    }
+    /* The Nano drives the same patterns itself, on its own clock: with the C5's walk, it places a fault on a hop. */
+    if (s_checks[NANO].state == CHECK_OK) {
+        const uint8_t on = CONTROL_PATTERN | CONTROL_OWN_CLOCK, off = 0;
+        bus_enable(true);
+        if (!nano_write(REG_CONTROL, &on, 1)) ok = fail(NANO_WALK, "Nano refused pattern mode");
+        else ok = check_lanes(NANO_WALK, nano_pattern) && ok;
+        nano_write(REG_CONTROL, &off, 1);
     }
     bus_enable(false);
     s_took_us = esp_timer_get_time() - t0;
@@ -256,7 +343,8 @@ void selftest_info(void)
         return;
     }
     if (!selftest_failed()) {
-        say("self-check ok in %lld ms, %lld s ago\n", s_took_us / 1000, (esp_timer_get_time() - s_at_us) / 1000000);
+        say("self-check ok in %lld ms, %lld s ago%s\n", s_took_us / 1000, (esp_timer_get_time() - s_at_us) / 1000000,
+            s_retries ? ", after a second look at the bus enable" : "");
         return;
     }
     say("self-check FAILED %lld s ago:", (esp_timer_get_time() - s_at_us) / 1000000);
