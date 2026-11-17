@@ -74,7 +74,8 @@ class Sync:
         self.histogram = [0] * 256
         self.line = self.line_frac = 0
         self.period = LINE_Q16
-        self.render_at = 0
+        # decode.c starts at 0 and renders a line from samples not yet in; here the first line waits for its samples.
+        self.render_at = RENDER_AT
         self.hit = False
         self.missed = LOST_AFTER_LINES
         self.vline = self.parity = 0
@@ -234,7 +235,7 @@ class Sync:
         self.lines.append((self.line, self.line_frac, self.hit, self.vline, self.parity))
         if self.vline == FIRST_ACTIVE + ACTIVE_LINES - 1:
             self.emit_field()
-        if self.vline & 3 == 0:
+        if (self.vline & 3) == 0:
             s, at = 0, self.line & ~3
             for i in range(0, LINE_Q16 >> 16, 4):
                 s += self.block(at + i)
