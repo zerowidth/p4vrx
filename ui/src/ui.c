@@ -23,9 +23,9 @@
 #define RADIUS 12
 #define EDGE 2
 /* The signal history: a bar every HISTORY_MS, BAR_W wide with a pixel between. */
-#define HISTORY_MS 100
+#define HISTORY_MS 200
 #define HISTORY_BAR_W 2
-#define REDRAW_TICKS 2
+#define REDRAW_TICKS 1
 #define HISTORY 48
 
 static const char BANDS[] = "RABEFL";
@@ -125,8 +125,7 @@ bool ui_update(const ui_state_t *now, uint32_t ms)
             scanned |= now->levels[i] != -128;
         }
         s_ch_head = (s_ch_head + 1) % CH_HISTORY;
-        /* A sample every HISTORY_MS, a redraw every REDRAW_TICKS of them: the bars stay fine-grained and the
-         * graphs move half as often. */
+        /* A sample every HISTORY_MS, drawn as it comes (REDRAW_TICKS 1) as one narrow bar or column. */
         static unsigned ticks;
         if (++ticks % REDRAW_TICKS == 0) {
             if (scanned) s_dirty = true;
