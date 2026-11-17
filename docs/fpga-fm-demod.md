@@ -2,9 +2,11 @@
 
 The Nano takes the C5's I/Q at 40 MS/s, demodulates it, and sends the P4 frequency samples at 13.33 MS/s on the same 14-lane bus. The P4 keeps its decoder from the composite onward and drops its phase lookup, difference and despeck. Pass-through stays selectable, so the current path keeps working and the no-FPGA build is unchanged.
 
-Status: design, fixed-point model (`models/fm_demod.py`), and the 40 MHz PLL proven on hardware (`fpga/boards/tangnano20k/fm_top.v`, SRAM only). Demod RTL (`fpga/rtl/fm_demod.v`) matches the model bit for bit in iverilog on three captures (`models/fm_demod_check.py`, 9,880-39,880 outputs each), and is wired into `fm_top` behind control bit 2: 14% of LUT4s, 7% of flops, 11 multipliers, the 40 MHz domain closing at 73 MHz. Not yet run on hardware.
+Status: running on hardware from SRAM (`fm_top`), selected with `decode source fm` on the P4; raw stays the default and the Nano's flash still holds `lockout_regs_top`. Against raw on R4 at a fixed gain of 57, three alternations of 10 s each: sync-tip noise 72-80 kHz against 110-135, and 0-2 clicked lines against 15-124. After PCLK went to 50% duty, 67-70 kHz against 135-138. The decoder's core 1 load is unchanged (54.6% against 55.1%).
 
-PLL test, 2026-11-17: `fm_top` is `lockout_regs_top` plus a PLL taking the lockout's clean clock ×3, with its lock, edges per ms and lock losses in I2C registers (`nano read`). Decoding R4 it held lock at 40,000 edges/ms for 60 s while the lockout took 13,333 C5 clock edges/ms of 13,353-13,367 seen. On dead R2 at gain 77, the noisiest case for the lanes, it held for 30 s with 13,777-13,844 seen: no lock lost after the 6 at boot, when the P4 resets the C5. The 2026-11-16 PLL bitstream, fed the raw C5 clock, lost lock.
+- RTL (`fpga/rtl/fm_demod.v`) matches the model bit for bit in iverilog on three captures (`models/fm_demod_check.py`). `fm_top`: 14% of LUT4s, 7% of flops, 11 multipliers, the 40 MHz domain closing at 76 MHz.
+- PLL, 2026-11-17: the lockout's clean clock ×3 held lock at 40,000 edges/ms for 60 s decoding R4, and 30 s on dead R2 at gain 77 with about 450 crosstalk edges/ms refused. The 2026-11-16 PLL bitstream, fed the raw C5 clock, lost lock.
+- The PLL's dynamic phase made no difference: 16 steps all gave 167-183 kHz in the first, overrun-bound run. Either the eye is wide at 40 MS/s or the phase setting isn't taking; untested further.
 
 ## Why
 
@@ -32,6 +34,13 @@ All at 40 MHz in the PLL's domain.
 Taps: −1 −6 −15 −11 36 133 236 280 236 133 36 −11 −15 −6 −1.
 
 ## On the bus
+
+As built, the Nano sends a phase rather than a frequency: each output adds 3 × the 14-bit frequency to a 14-bit accumulator, whose top 8 bits are the decoder's 8-bit phase (1/256 turn at 13.33 MS/s, 52.08 kHz a step; the frequency's LSB is exactly 3/64 of that) and whose low 6 are its fraction. In fm mode the P4 maps PARLIO so D13..D6 land in each word's high byte, and its existing SIMD `bs_demod` and `despeck` take that byte as they take the BitScrambler's. A first version that converted 14-bit frequencies to steps in C took core 1 to 96.7% with 10,889 ring overruns. Summed and differenced, each step is within one unit and drift-free.
+
+PCLK in fm mode is clk40 / 3, high for 37.5 ns from a falling-edge flop. With a 25 ns low pulse the decoder's line read 847.53-847.74 samples, against 847.39 raw; at 50% duty it reads 847.39.
+
+The design as first written:
+
 
 - The same 14 lanes and PCLK. In fm mode the Nano makes PCLK as the 40 MHz clock divided by 3, high for two of its periods, and changes the word as PCLK falls: 25 ns before the P4 samples on the rise and 50 ns after. That holds whatever the PLL's phase, which only places the lane sampling. The rate stays 13.33 MS/s, locked to the C5.
 - Control register 0x08 bit 2 chooses the demodulated words over the raw lanes. Pattern mode (bit 0) still wins, so the self-check is unchanged.
@@ -82,6 +91,10 @@ On four 40 MS/s captures of R4 (2026-11-15 and -16). Error is rms against the fl
 - Some of the P4's error is noise above 5.5 MHz that the Nano filters out and the P4 keeps; its decoder filters some of it later.
 
 ## Open
+
+- Gain: fm mode holds the gain where it was set. The Nano's mean magnitude (0x12-0x13) is there for the gain loop to read.
+- The channel scan reads power from the BitScrambler's bytes, which fm mode doesn't have; a scan would need raw lanes for its duration, or the Nano's magnitude.
+- A capture of the FM words showed 158 outliers in 262,144 samples; of those one flipped bit explains, 61 of 64 are bit 9, so D9 may be marginal at this timing.
 
 - The output scale against the decoder's units: 2.44 kHz is about 1/21 of today's 52 kHz step.
 - Whether 80 MS/s (802.11p off, a wider filter) is worth it later; it needs an 80 MHz PLL output and the same PLL phase search.

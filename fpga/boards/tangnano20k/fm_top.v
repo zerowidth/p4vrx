@@ -4,8 +4,9 @@
 //   0x0b 40 MHz PLL phase step, 0-15 (dynamic phase, 22.5 degrees a step)
 //   0x0c-0x0d 40 MHz PLL edges per ms (low byte first, holding the high byte)
 //   0x0e times the 40 MHz PLL lost lock, saturating at 255
-//   0x08 control bit 2: the lanes carry FM demod (14-bit frequency, 2.44 kHz an LSB) with PCLK from the 40 MHz
-//        clock divided by 3; bit 3: track the I/Q offsets rather than use 0x10-0x11
+//   0x08 control bit 2: the lanes carry FM demod with PCLK from the 40 MHz clock divided by 3, as a 14-bit phase
+//        that sums 3 x each 14-bit frequency (2.44 kHz an LSB): D13..D6 are the P4 decoder's 8-bit phase,
+//        1/256 turn at 13.33 MS/s, and D5..D0 its fraction; bit 3: track the I/Q offsets rather than use 0x10-0x11
 //   0x10-0x11 I and Q offsets, signed, as the lanes read 2v+1; reads give the ones in use
 //   0x12-0x13 mean CORDIC magnitude over the last 32768 samples, low byte first (holding the high byte)
 // lockout_regs_top's description:
@@ -79,16 +80,20 @@ module fm_top #(
     reg [2:0] lock40_s = 0;
     reg [7:0] losses40 = 0;
 
-    // FM demod at the bus rate. The Nano makes PCLK as clk40 / 3 and changes the data as PCLK falls, a third
-    // of a period before the P4 samples on its rise, whatever the PLL's phase.
+    // FM demod at the bus rate. The Nano makes PCLK as clk40 / 3, and the data changes 25 ns before PCLK
+    // rises and 12.5 ns after it falls, whichever edge the P4 samples on and whatever the PLL's phase.
     reg [13:0] lanes40 = 0;
     always @(posedge clk40) lanes40 <= {c5_q, c5_i};
+    // PCLK high for 1.5 periods of clk40 from the period after the data changes: a 25 ns low pulse lost the
+    // P4 about 600 samples per million on the ribbon.
     reg [1:0] third = 0;
-    reg pclk_fm = 0;
+    reg pclk_a = 0, pclk_b = 0;
     always @(posedge clk40) begin
         third <= third == 2 ? 2'd0 : third + 1'd1;
-        pclk_fm <= third != 2;
+        pclk_a <= third == 0;
     end
+    always @(negedge clk40) pclk_b <= pclk_a;
+    wire pclk_fm = pclk_a | pclk_b;
     reg signed [7:0] dc_i_set = 0, dc_q_set = 0, dc_i_auto = 0, dc_q_auto = 0;
     reg [3:0] control40 = 0;
     always @(posedge clk40) control40 <= control;
@@ -96,6 +101,8 @@ module fm_top #(
     wire signed [7:0] dc_q = control40[3] ? dc_q_auto : dc_q_set;
     wire signed [13:0] fm_out;
     wire [8:0] magnitude;
+    reg [13:0] fm_phase = 0;
+    always @(posedge clk40) if (third == 2) fm_phase <= fm_phase + fm_out * 3;
     fm_demod demod (
         .clk(clk40), .in_i(lanes40[6:0]), .in_q(lanes40[13:7]), .dc_i(dc_i), .dc_q(dc_q),
         .take(third == 1), .out(fm_out), .magnitude(magnitude)
@@ -225,6 +232,6 @@ module fm_top #(
     wire fm = control[2] && !control[0];
     wire drive = own_clock || fm ? en27[1] : en[1];
     assign p4_pclk = drive ? (own_clock ? ~half : fm ? pclk_fm : ~q) : 1'bz;
-    assign p4_d    = drive ? (control[0] ? pattern : fm ? fm_out : lanes) : 14'bz;
+    assign p4_d    = drive ? (control[0] ? pattern : fm ? fm_phase : lanes) : 14'bz;
 
 endmodule

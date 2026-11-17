@@ -354,6 +354,12 @@ void selftest_info(void)
     say("\n");
 }
 
+bool nano_control(uint8_t control)
+{
+    if (!s_nano) check_nano();
+    return nano_write(REG_CONTROL, &control, 1);
+}
+
 /* nano read <reg> [n] | nano write <reg> <byte>...: the Nano's registers, in hex. */
 void nano_command(int argc, char **argv)
 {

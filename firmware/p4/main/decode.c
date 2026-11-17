@@ -213,6 +213,9 @@ static uint32_t s_nb;
 static uint32_t s_n;
 static uint8_t s_prev_phase;
 static bool s_despeck = true;
+/* The Nano demodulates (fm_top's control bit 2) and the ring holds its 14-bit frequencies, 2.44 kHz an LSB,
+ * rather than the BitScrambler's phase bytes; the gain stays where it is set. */
+static bool s_fm;
 static bool s_low;
 static uint32_t s_low_start;
 static int32_t s_thr_lo, s_thr_hi;
@@ -469,6 +472,7 @@ static bool s_gain_settling;
  * bits: a carrier circling its centre spends half its time on each side. */
 static void control(void)
 {
+    if (s_fm) return;
     if (s_bs_broken) {
         s_bs_broken = s_bs_pending = false;
         decode_stop();
@@ -1543,8 +1547,30 @@ static int marked_lanes(const uint8_t *b, uint32_t words)
 /* Demodulates a node's two bytes a sample; bytes is what the DMA wrote of the node. The marked
  * byte is on the even addresses from the first EOF after a start, and on the odd ones before it and from
  * each halt to the next EOF. */
+/* The Nano's phase, high byte of each word, differenced as the BitScrambler's is. */
+static void process_fm(const uint8_t *b, uint32_t bytes)
+{
+    uint32_t words = (bytes / 2) & ~15u;
+    uint32_t n = s_n;
+    for (uint32_t done = 0; done < words;) {
+        uint32_t at = n % HIST, run = words - done < HIST - at ? words - done : HIST - at;
+        bs_demod(b + 2 * done, s_hist + at, s_blocks + at / 4, run / 16, &s_prev_phase, 1);
+        if (at == 0) memcpy(s_hist_room, s_hist + HIST - 16, 16);
+        if (s_despeck) despeck(s_hist + at, s_blocks + at / 4, run / 16, DESPECK_K);
+        done += run;
+        n += run;
+    }
+    __atomic_store_n(&s_n, n, __ATOMIC_RELEASE);
+    if (s_survey) coast(n);
+    else if (!s_skip_detect) detect(n);
+}
+
 static void process_bs(const uint8_t *b, uint32_t bytes)
 {
+    if (s_fm) {
+        process_fm(b, bytes);
+        return;
+    }
     uint32_t words = (bytes / 2) & ~15u;
     if (!words) return;
     /* Q can keep one sign at every word looked at, which leaves both bytes looking marked. */
@@ -1810,6 +1836,9 @@ void decode_stop(void)
 
 static esp_err_t start_bs(void)
 {
+    /* Raw lanes unless the Nano demodulates; then it tracks the I/Q offsets itself too. */
+    nano_control(s_fm ? NANO_FM | NANO_TRACK_OFFSETS : 0);
+    if (s_fm) return ESP_OK;
     for (int c = 0; c < 32; ++c) {
         s_bs_power[c] = (uint32_t)lrintf(2 * iq_bs_code_centre(c) * iq_bs_code_centre(c));
         s_bs_centre4[c] = (int16_t)lrintf(4 * iq_bs_code_centre(c));
@@ -1839,7 +1868,9 @@ static esp_err_t start_rx(void)
         .eof_data_len = EOF_BYTES,
     };
     const parlio_rx_event_callbacks_t cbs = {.on_partial_receive = on_partial};
+    iq_phase_lanes(s_fm);
     esp_err_t err = iq_new_rx(RING_BYTES, &s_rx);
+    iq_phase_lanes(false);
     if (err != ESP_OK) return err;
     if ((err = parlio_new_rx_soft_delimiter(&dcfg, &s_delim)) != ESP_OK) return err;
     if ((err = parlio_rx_unit_register_event_callbacks(s_rx, &cbs, NULL)) != ESP_OK) return err;
@@ -2248,6 +2279,11 @@ void decode_command(int argc, char **argv)
         s_tnr_auto = strcmp(argv[2], "auto") == 0;
         if (!s_tnr_auto) s_tnr = atoi(argv[2]);
         if (argc > 3) s_tnr_mix = atoi(argv[3]);
+    } else if (strcmp(sub, "source") == 0 && argc > 2) {
+        /* Takes effect at the next start. */
+        s_fm = strcmp(argv[2], "fm") == 0;
+        say("ok, %s at the next decode on\n", s_fm ? "the Nano's FM demod" : "raw lanes");
+        return;
     } else if (strcmp(sub, "wraps") == 0 && argc > 2) {
         s_despeck = strcmp(argv[2], "off") != 0;
     } else if (strcmp(sub, "clicks") == 0 && argc > 2) {

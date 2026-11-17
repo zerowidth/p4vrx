@@ -27,6 +27,7 @@
 #include "console.h"
 #include "decode.h"
 #include "pins.h"
+#include "selftest.h"
 
 #define BUS_HZ 80000000
 /* Two NTSC fields at 40 MS/s, so a whole field is in every capture. */
@@ -116,6 +117,13 @@ static bool IRAM_ATTR on_partial(parlio_rx_unit_handle_t rx, const parlio_rx_eve
     return woken == pdTRUE;
 }
 
+static bool s_phase_lanes;
+
+void iq_phase_lanes(bool on)
+{
+    s_phase_lanes = on;
+}
+
 esp_err_t iq_new_rx(size_t max_recv_size, parlio_rx_unit_handle_t *ret)
 {
     parlio_rx_unit_config_t cfg = {
@@ -131,6 +139,11 @@ esp_err_t iq_new_rx(size_t max_recv_size, parlio_rx_unit_handle_t *ret)
         .flags.free_clk = 1,
     };
     for (int k = 0; k < 16; ++k) cfg.data_gpio_nums[k] = -1;
+    if (s_phase_lanes) {
+        /* The Nano's phase: D13..D6 as the high byte, where the decoder takes its phase byte, D5..D0 below. */
+        for (int k = 0; k < 14; ++k) cfg.data_gpio_nums[2 + k] = bus_lane_gpio(13 - k);
+        return parlio_new_rx_unit(&cfg, ret);
+    }
     for (int k = 1; k <= 7; ++k) {
         cfg.data_gpio_nums[k] = bus_lane_gpio(14 - k);    /* D0 (I1) .. D6 (I7) */
         cfg.data_gpio_nums[8 + k] = bus_lane_gpio(7 - k); /* D7 (Q1) .. D13 (Q7) */
@@ -600,6 +613,8 @@ bool iq_start(const char *channel, int every)
 {
     if (!prepare()) return false;
     decode_stop();
+    /* The probe and clock placement read the raw lanes. */
+    nano_control(0);
     bus_enable(true);
     if (s_pll) {
         s_edge = PARLIO_SAMPLE_EDGE_POS;
