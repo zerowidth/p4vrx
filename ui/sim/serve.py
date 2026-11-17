@@ -16,7 +16,7 @@ changed = threading.Condition()
 
 
 def watched():
-    for path in list(UI.glob("src/*")) + list(UI.glob("fonts/*.c")) + list(SIM.glob("*")):
+    for path in list(UI.glob("src/*")) + list(UI.glob("fonts/*.[ch]")) + list(SIM.glob("*")):
         if path.is_file() and path.suffix in {".c", ".h", ".html", ".js", ".css"}:
             yield path
 

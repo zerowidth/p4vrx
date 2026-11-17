@@ -21,6 +21,7 @@
 #include "c5.h"
 #include "decode.h"
 #include "lcd.h"
+#include "screen.h"
 #include "iq.h"
 #include "still.h"
 #include "pins.h"
@@ -76,6 +77,7 @@ static const command_t s_commands[] = {
     {"decode", decode_command, "decode on [channel] tunes the C5 and decodes NTSC continuously; off stops; alone shows lock and load"},
     {"video", video_command, "frame and H.264 stats; grab sends the newest access unit, raw the newest decoded 720x480 frame; bitrate N"},
     {"lcd", lcd_command, "the panel's frame rate and timings; rotate turns the picture half a turn"},
+    {"ui", screen_command, "ui touch shows the touch controller and the last touch; ui open 0|1|2 opens the main strip, channel picker or band grid; ui pick <channel> tunes as a tap would"},
     {"still", still_command, "decodes one field of the last capture (iq 1400000) to 320x240 grey and sends it; inv flips sync polarity"},
     {"usb", usb_command, "the console's USB state; usb suspend reports a suspend the host never sent, to test the recovery"},
     {"pins", pins_command, "pins read lists the Nano-facing pins (lanes pulled down); drive <name> <0|1>, release, or bus on|off"},

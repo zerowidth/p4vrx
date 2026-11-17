@@ -29,6 +29,11 @@ typedef struct {
     /* HDZero only: the stream's format and the link quality in percent, in place of the analog level. */
     ui_hdz_format_t hdz_format;
     int link_quality;
+    /* A console session is open, touch is switched off, a recording runs, an SD card is in. */
+    bool console, touch_off, recording, sd_card;
+    /* Each channel's level, as level above, by band (R A B E F L) times 8 plus number less 1; -128 unread. Only the
+     * channels ui_scan asks for are read. */
+    int8_t levels[48];
 } ui_state_t;
 
 typedef enum { UI_NOTHING, UI_TUNE } ui_action_kind_t;
@@ -38,11 +43,23 @@ typedef struct {
     char channel[4];
 } ui_action_t;
 
-/* Takes the receiver's state; true when the strip should be redrawn. */
-bool ui_update(const ui_state_t *now);
-/* Draws the strip (UI_STRIP_W x UI_H) for the state last taken. */
-void ui_draw(canvas_t *strip);
+/* Which part of the panel the UI draws: the strip beside the picture, or all of it. */
+typedef enum { UI_LAYOUT_STRIP, UI_LAYOUT_FULL } ui_layout_t;
+
+/* Takes the receiver's state at a time in milliseconds; true when the UI should be redrawn. */
+bool ui_update(const ui_state_t *now, uint32_t ms);
+ui_layout_t ui_layout(void);
+/* The strip on the panel's left (the default) or right; the picture takes the other UI_PIC_W columns. */
+void ui_set_strip_left(bool left);
+int ui_strip_x(void);
+int ui_picture_x(void);
+/* Draws the UI: into the UI_STRIP_W x UI_H strip, or the whole UI_W x UI_H panel, as ui_layout says. */
+void ui_draw(canvas_t *c);
 /* A touch at (x, y) in panel coordinates, down or lifted; true when it asks for an action. */
 bool ui_touch(int x, int y, bool down, ui_action_t *out);
+/* What the open menu wants scanned, with decoding paused: NULL for nothing, a band's letter, or "all". */
+const char *ui_scan(void);
+/* Opens a screen as a tap would, for testing without touch: 0 the main strip, 1 the channel picker, 2 the band grid. */
+void ui_open(int screen);
 /* A channel's frequency, such as R4's 5769, or 0 for a name that isn't one. */
 uint16_t ui_channel_mhz(const char *channel);

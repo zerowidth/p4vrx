@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Adapted from C5VRX p4usb (reference/p4usb/main/decode.c), by Twotoz and the C5VRX contributors.
 #include "decode.h"
+#include "sweep.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -356,7 +357,8 @@ static void set_gain(int gain)
 {
     char cmd[16], reply[32];
     snprintf(cmd, sizeof cmd, "gain %d", gain);
-    if (c5_request(cmd, reply, sizeof reply, 1000)) s_gain = gain;
+    /* Short: on a dead channel these come often, and a lost reply would hold up a menu's scan behind it. */
+    if (c5_request(cmd, reply, sizeof reply, 200)) s_gain = gain;
 }
 
 static void remember_dc(int qi, int qq)
@@ -1164,7 +1166,7 @@ static void draw_line(const job_t *j)
             const uint8_t *before = NULL, *old = old_row(row - 1, &before);
             const uint8_t k[2] = {2 * abs(s_tnr), s_tnr_mix};
             if (old && s_tnr) tnr_row(dst, before, s_tnr < 0 ? BLOCKS / 2 : BLOCKS, k);
-            deint_row(rows, s_above_row == row - 2 ? s_above : below, below, old ? old : below, other, s_deint_masks);
+            deint_row(rows, s_above && s_above_row == row - 2 ? s_above : below, below, old ? old : below, other, s_deint_masks);
         }
         if (row + 2 == VIDEO_HEIGHT) memcpy(dst + ROW_STRIDE, other, ROW_BYTES);
         s_above = below;
@@ -1578,6 +1580,7 @@ static void process_bs(const uint8_t *b, uint32_t bytes)
     }
 
     uint32_t n = s_n;
+    sweep_take(b, words, n, odd, s_bs_power);
     for (uint32_t done = 0; done < words;) {
         uint32_t at = n % HIST, run = words - done < HIST - at ? words - done : HIST - at;
         bs_demod(b + 2 * done, s_hist + at, s_blocks + at / 4, run / 16, &s_prev_phase, odd);
@@ -1769,6 +1772,11 @@ static void decode_task(void *arg)
                 for (uint32_t o = s_read; o < stop; o += NODE_BYTES) process_node(o);
                 s_read = stop % RING_BYTES;
             }
+            /* The node the DMA finished last ended at its interrupt's time; the samples up to it are counted from
+             * those read. */
+            int64_t isr_us = s_node_last_us;
+            uint32_t done = dma_offset();
+            if (isr_us == s_node_last_us) sweep_clock(s_n + (done - s_read + RING_BYTES) % RING_BYTES / 2, isr_us);
             s_read_us = now;
             bool low = s_vline >= BS_RELOAD_FROM && s_vline < BS_RELOAD_TO;
             if (s_bs_pending && (low || s_missed >= LOST_AFTER_LINES)) bs_reload();
@@ -1878,7 +1886,7 @@ static bool start(const char *channel, bool force)
         /* Demodulation and sync detection stream through every sample on core 1; drawing shares core 0 with
          * USB and the console, above them since level tasks would time-slice it 1 ms at a time. */
         xTaskCreatePinnedToCore(draw_task, "decode_draw", 4096, NULL, 7, &s_draw_task, 0);
-        xTaskCreatePinnedToCore(decode_task, "decode", 4096, NULL, 10, &s_task, 1);
+        xTaskCreatePinnedToCore(decode_task, "decode", 8192, NULL, 10, &s_task, 1);
     }
     /* A failed probe still leaves the decoder running on the last edge and gain, as it must always run. */
     bool probed = iq_start(channel, EVERY);
@@ -2054,9 +2062,11 @@ bool decode_start(const char *channel)
 {
     /* The C5 streams I/Q across a retune and the gain loop follows the new signal, so no restart is needed. */
     if (s_running && channel && strcasecmp(channel, s_channel) != 0) {
-        if (!iq_retune(channel)) return false;
-        forget_dc();
+        bool tuned = iq_retune(channel);
+        /* A failed retune may still have moved the C5 somewhere; name the channel it reports. */
         strlcpy(s_channel, iq_channel(&s_mhz), sizeof s_channel);
+        if (!tuned) return false;
+        forget_dc();
         return true;
     }
     decode_stop();
@@ -2106,6 +2116,25 @@ static int survey_rms(void)
     if (hot * 2 > nodes || clipped * 10 > n) return -1;
     float var = n ? (float)power / n - 2 * mean * mean : 0;
     return var > 0 ? (int)lrintf(sqrtf(var)) : 0;
+}
+
+void decode_hold(bool hold)
+{
+    if (!hold) {
+        s_dc_n = s_neg_i = s_neg_q = 0;
+        s_dc_power = s_dc_clipped = s_dc_nodes = s_dc_hot = 0;
+    }
+    s_survey = hold;
+}
+
+uint32_t decode_fields(void)
+{
+    return s_fields;
+}
+
+int decode_gain(void)
+{
+    return s_gain;
 }
 
 bool decode_survey(const char *const *channels, int n, int8_t *levels, bool (*stop)(void))
@@ -2215,6 +2244,8 @@ void decode_command(int argc, char **argv)
         s_clicks = strcmp(argv[2], "off") == 0 ? CLICKS_SHOWN : strcmp(argv[2], "gray") == 0 ? CLICKS_GRAY : CLICKS_HOLD;
     } else if (strcmp(sub, "luma") == 0 && argc > 2) {
         s_luma_kind = strcmp(argv[2], "plain") == 0 ? LUMA_PLAIN : strcmp(argv[2], "peak") == 0 ? LUMA_PEAK : LUMA_SOFT;
+    } else if (strcmp(sub, "sweep") == 0) {
+        sweep_command(argc, argv);
     } else if (strcmp(sub, "nodes") == 0) {
         say("%lu nodes, %lu gaps over two nodes' time totalling %lld us, the longest %lld us\n", (unsigned long)s_node_count,
             (unsigned long)s_node_gaps, s_node_gap_total_us, s_node_gap_max_us);

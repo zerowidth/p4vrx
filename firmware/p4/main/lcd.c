@@ -112,6 +112,12 @@ static bool turned_270(void)
     return s_rotation == PPA_SRM_ROTATION_ANGLE_270;
 }
 
+/* The panel row a landscape span of width w from column x starts at: one way round, columns are rows. */
+static uint32_t row_of(int x, int w)
+{
+    return turned_270() ? x : LCD_H - x - w;
+}
+
 /* The PPA turns the strip as it turns the picture, into the rows after the picture's or before them. */
 static void copy_strip(void *fb)
 {
@@ -120,7 +126,7 @@ static void copy_strip(void *fb)
         .in = {.buffer = s_strip.px, .pic_w = STRIP_W, .pic_h = LCD_W, .block_w = STRIP_W, .block_h = LCD_W,
                .srm_cm = PPA_SRM_COLOR_MODE_RGB565},
         .out = {.buffer = fb, .buffer_size = FRAME_BYTES, .pic_w = LCD_W, .pic_h = LCD_H,
-                .block_offset_x = 0, .block_offset_y = turned_270() ? PIC_W : 0, .srm_cm = PPA_SRM_COLOR_MODE_RGB565},
+                .block_offset_x = 0, .block_offset_y = row_of(ui_strip_x(), STRIP_W), .srm_cm = PPA_SRM_COLOR_MODE_RGB565},
         .rotation_angle = s_rotation,
         .scale_x = 1.0f,
         .scale_y = 1.0f,
@@ -129,6 +135,64 @@ static void copy_strip(void *fb)
     if (ppa_do_scale_rotate_mirror(s_srm, &srm) != ESP_OK) return;
     s_strip_us = esp_timer_get_time() - t0;
     ++s_strip_copies;
+}
+
+/* The whole panel in landscape, for UI screens that cover the picture; only drawn while the picture is held. */
+static canvas_t s_full;
+static volatile bool s_full_on;
+static volatile uint8_t s_full_stale;
+
+static void copy_full(void *fb)
+{
+    const ppa_srm_oper_config_t srm = {
+        .in = {.buffer = s_full.px, .pic_w = UI_W, .pic_h = UI_H, .block_w = UI_W, .block_h = UI_H, .srm_cm = PPA_SRM_COLOR_MODE_RGB565},
+        .out = {.buffer = fb, .buffer_size = FRAME_BYTES, .pic_w = LCD_W, .pic_h = LCD_H, .srm_cm = PPA_SRM_COLOR_MODE_RGB565},
+        .rotation_angle = s_rotation,
+        .scale_x = 1.0f,
+        .scale_y = 1.0f,
+        .mode = PPA_TRANS_MODE_BLOCKING,
+    };
+    ppa_do_scale_rotate_mirror(s_srm, &srm);
+}
+
+canvas_t *lcd_full_begin(void)
+{
+    if (!s_strip_lock) return NULL;
+    if (!s_full.px) {
+        s_full = (canvas_t){heap_caps_aligned_calloc(128, 1, UI_W * UI_H * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA), UI_W, UI_H, UI_W};
+        if (!s_full.px) return NULL;
+    }
+    xSemaphoreTake(s_strip_lock, portMAX_DELAY);
+    return &s_full;
+}
+
+void lcd_full_end(void)
+{
+    esp_cache_msync(s_full.px, UI_W * UI_H * 2, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+    s_full_on = true;
+    s_full_stale = 7;
+    xSemaphoreGive(s_strip_lock);
+    if (s_task) xTaskNotifyGive(s_task);
+}
+
+void lcd_full_off(void)
+{
+    if (!s_full_on) return;
+    s_full_on = false;
+    /* The picture comes back with the next frame; the strip has to be put back beside it. */
+    s_strip_stale = 7;
+}
+
+/* Landscape coordinates for a point given as the panel's own (480 across, 800 down), turned as the picture is. */
+void lcd_landscape(int px, int py, int *x, int *y)
+{
+    if (turned_270()) {
+        *x = py;
+        *y = LCD_W - 1 - px;
+    } else {
+        *x = LCD_H - 1 - py;
+        *y = px;
+    }
 }
 
 canvas_t *lcd_strip_begin(void)
@@ -140,9 +204,11 @@ canvas_t *lcd_strip_begin(void)
 
 void lcd_strip_end(void)
 {
+    bool paused = s_paused;
     esp_cache_msync(s_strip.px, STRIP_BYTES, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
     s_strip_stale = 7;
     xSemaphoreGive(s_strip_lock);
+    if (paused && s_task) xTaskNotifyGive(s_task);
 }
 
 static bool IRAM_ATTR on_vsync(esp_lcd_panel_handle_t panel, esp_lcd_dpi_panel_event_data_t *e, void *arg)
@@ -226,7 +292,7 @@ static void show(const uint8_t *yuv)
         .in = {.buffer = yuv, .pic_w = VIDEO_WIDTH, .pic_h = VIDEO_HEIGHT, .block_w = VIDEO_WIDTH, .block_h = VIDEO_HEIGHT,
                .srm_cm = PPA_SRM_COLOR_MODE_YUV420, .yuv_range = PPA_COLOR_RANGE_FULL, .yuv_std = PPA_COLOR_CONV_STD_RGB_YUV_BT601},
         .out = {.buffer = fb, .buffer_size = FRAME_BYTES, .pic_w = LCD_W, .pic_h = LCD_H,
-                .block_offset_x = 0, .block_offset_y = turned_270() ? 0 : STRIP_W, .srm_cm = PPA_SRM_COLOR_MODE_RGB565},
+                .block_offset_x = 0, .block_offset_y = row_of(ui_picture_x(), PIC_W), .srm_cm = PPA_SRM_COLOR_MODE_RGB565},
         .rotation_angle = s_rotation,
         .scale_x = SCALE_X,
         .scale_y = 1.0f,
@@ -254,6 +320,22 @@ static void lcd_task(void *arg)
     uint32_t frames = 0;
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        if (s_paused) {
+            /* No frames come while the picture is held, so a changed strip, or the whole-panel UI, goes into every
+             * buffer, the one on screen too. */
+            if (s_full_on && s_full_stale && xSemaphoreTake(s_strip_lock, 0) == pdTRUE) {
+                for (int k = 0; k < 3; ++k) copy_full(s_fb[k]);
+                s_full_stale = 0;
+                xSemaphoreGive(s_strip_lock);
+                continue;
+            }
+            if (!s_full_on && s_strip_stale && xSemaphoreTake(s_strip_lock, 0) == pdTRUE) {
+                for (int k = 0; k < 3; ++k) copy_strip(s_fb[k]);
+                s_strip_stale = 0;
+                xSemaphoreGive(s_strip_lock);
+            }
+            continue;
+        }
         const uint8_t *yuv = s_pending;
         if (!yuv) continue;
         show(yuv);
@@ -282,6 +364,19 @@ void lcd_init(void)
     s_strip = (canvas_t){heap_caps_aligned_calloc(128, 1, STRIP_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA), STRIP_W, LCD_W, STRIP_W};
     if (s_strip.px) s_strip_lock = xSemaphoreCreateMutex();
     xTaskCreatePinnedToCore(lcd_task, "lcd", 4096, NULL, 3, &s_task, 0);
+}
+
+void lcd_blank(void)
+{
+    if (!s_paused) return;
+    for (int k = 0; k < 3; ++k) clear(s_fb[k]);
+    s_strip_stale = 7;
+    if (s_task) xTaskNotifyGive(s_task);
+}
+
+void lcd_hold(bool hold)
+{
+    s_paused = hold;
 }
 
 void lcd_offer(const uint8_t *yuv)

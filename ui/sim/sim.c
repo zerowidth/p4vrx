@@ -4,7 +4,7 @@
 #define EXPORT(name) __attribute__((export_name(#name)))
 
 static uint16_t s_fb[UI_W * UI_H];
-static ui_state_t s_state = {.channel = "R4", .decoding = true, .locked = true, .level = 37};
+static ui_state_t s_state = {.channel = "R4", .decoding = true, .locked = true, .level = 37, .levels = {[0 ... 47] = -128}};
 static ui_action_t s_action;
 
 EXPORT(sim_fb) uint16_t *sim_fb(void)
@@ -28,6 +28,31 @@ EXPORT(sim_set_hdzero) void sim_set_hdzero(int format, int link_quality)
     s_state.link_quality = link_quality;
 }
 
+EXPORT(sim_set_status) void sim_set_status(int console, int touch_off, int recording, int sd_card)
+{
+    s_state.console = console;
+    s_state.touch_off = touch_off;
+    s_state.recording = recording;
+    s_state.sd_card = sd_card;
+}
+
+/* What the UI wants scanned: 0 nothing, 1-6 a band (R A B E F L), 7 every band. */
+EXPORT(sim_scan) int sim_scan(void)
+{
+    const char *scan = ui_scan();
+    if (!scan) return 0;
+    if (scan[0] == 'a' && scan[1] == 'l') return 7;
+    static const char bands[] = "RABEFL";
+    for (int b = 0; bands[b]; ++b)
+        if (bands[b] == scan[0]) return b + 1;
+    return 0;
+}
+
+EXPORT(sim_set_level) void sim_set_level(int index, int level)
+{
+    if (index >= 0 && index < 48) s_state.levels[index] = (int8_t)level;
+}
+
 EXPORT(sim_set_channel) void sim_set_channel(int band, int number)
 {
     s_state.channel[0] = (char)band;
@@ -40,12 +65,34 @@ EXPORT(sim_channel_mhz) int sim_channel_mhz(void)
     return ui_channel_mhz(s_state.channel);
 }
 
-/* True when the strip was redrawn into the frame. */
-EXPORT(sim_frame) int sim_frame(void)
+EXPORT(sim_set_strip_left) void sim_set_strip_left(int left)
 {
-    if (!ui_update(&s_state)) return 0;
-    canvas_t strip = {s_fb + UI_PIC_W, UI_STRIP_W, UI_H, UI_W};
-    ui_draw(&strip);
+    ui_set_strip_left(left);
+}
+
+EXPORT(sim_strip_x) int sim_strip_x(void)
+{
+    return ui_strip_x();
+}
+
+EXPORT(sim_picture_x) int sim_picture_x(void)
+{
+    return ui_picture_x();
+}
+
+/* Whether the UI covers the whole panel. */
+EXPORT(sim_full) int sim_full(void)
+{
+    return ui_layout() == UI_LAYOUT_FULL;
+}
+
+/* True when the UI was redrawn into the frame. */
+EXPORT(sim_frame) int sim_frame(double ms)
+{
+    if (!ui_update(&s_state, (uint32_t)ms)) return 0;
+    canvas_t c = ui_layout() == UI_LAYOUT_FULL ? (canvas_t){s_fb, UI_W, UI_H, UI_W}
+                                               : (canvas_t){s_fb + ui_strip_x(), UI_STRIP_W, UI_H, UI_W};
+    ui_draw(&c);
     return 1;
 }
 
