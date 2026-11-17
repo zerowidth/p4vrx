@@ -25,3 +25,9 @@ void radio_iq_stop(void);
 void radio_clock_slip(uint32_t us);
 /* Pad drive strength, 0-3, for the data lanes and the clock. */
 void radio_set_drive(int data, int clock);
+
+void radio_hop_time(uint16_t mhz, int n, int how, uint32_t *out_min, uint32_t *out_max, uint32_t *back_min, uint32_t *back_max);
+/* Moves the LO to mhz with the PLL setter alone, in about 400 us, leaving the rest of the radio as tuned; the
+ * PLL has settled about 100 us in. */
+void radio_lo_hop(uint16_t mhz);
+bool radio_channel_mhz(const char *name, uint16_t *mhz);

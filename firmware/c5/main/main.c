@@ -19,7 +19,9 @@
 
 #include "lanes.h"
 #include "link.h"
+#include "esp_timer.h"
 #include "radio.h"
+#include "sweep.h"
 
 /* Waveshare C5-Zero antenna switch: low selects the on-board antenna, high the U.FL. */
 #define ANTENNA_SEL_GPIO GPIO_NUM_26
@@ -79,9 +81,9 @@ static void reply(const char *fmt, ...)
 
 static void run_command(char *line)
 {
-    char *argv[6];
+    char *argv[52];
     int argc = 0;
-    for (char *tok = strtok(line, " "); tok && argc < 6; tok = strtok(NULL, " ")) argv[argc++] = tok;
+    for (char *tok = strtok(line, " "); tok && argc < 52; tok = strtok(NULL, " ")) argv[argc++] = tok;
     if (argc == 0) return;
 
     if (strcmp(argv[0], "ping") == 0) {
@@ -141,6 +143,18 @@ static void run_command(char *line)
         esp_clk_tree_src_get_freq_hz(SOC_MOD_CLK_CPU, ESP_CLK_TREE_SRC_FREQ_PRECISION_EXACT, &cpu);
         reply("ok clk xtal=%lu f240=%lu cpu=%lu parl_tx=%08lx", (unsigned long)xtal, (unsigned long)f240, (unsigned long)cpu,
               (unsigned long)PCR.parl_clk_tx_conf.val);
+    } else if (strcmp(argv[0], "hoptime") == 0 && argc >= 2) {
+        uint32_t a0, a1, b0, b1;
+        radio_hop_time((uint16_t)atoi(argv[1]), argc > 2 ? atoi(argv[2]) : 20, argc > 3 ? atoi(argv[3]) : 0, &a0, &a1, &b0, &b1);
+        reply("ok hoptime out %lu-%lu back %lu-%lu us", (unsigned long)a0, (unsigned long)a1, (unsigned long)b0, (unsigned long)b1);
+    } else if (strcmp(argv[0], "renew") == 0) {
+        reply(sweep_renew() ? "ok renew" : "err renew: no scan");
+    } else if (strcmp(argv[0], "sweep") == 0) {
+        int n = sweep_set((const char *const *)argv + 1, argc - 1);
+        uint32_t hops, passes;
+        sweep_counts(&hops, &passes);
+        if (n < 0) reply("err sweep");
+        else reply("ok sweep %d, %lu hops, %lu passes", n, (unsigned long)hops, (unsigned long)passes);
     } else if (strcmp(argv[0], "status") == 0) {
         int rssi = 0, noise = 0;
         bool have_rssi = radio_rssi(&rssi), have_noise = radio_noise_floor(&noise);
@@ -162,7 +176,7 @@ void app_main(void)
     lanes_drive_low();
     printf("c5rx ready\n");
 
-    char line[64];
+    char line[200];
     size_t len = 0;
     for (;;) {
         uint8_t c;

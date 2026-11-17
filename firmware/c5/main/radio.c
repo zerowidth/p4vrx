@@ -7,6 +7,10 @@
 #include <string.h>
 
 #include "driver/gpio.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
 #include "driver/parlio_tx.h"
 #include "esp_event.h"
 #include "esp_heap_caps.h"
@@ -51,6 +55,11 @@ extern void phy_rfagc_disable(void);
 extern void phy_wifi_fbw_sel(uint32_t val);
 extern void phy_force_rx_gain(bool enable, uint8_t gain_idx);
 extern void phy_set_freq(uint16_t freq_mhz, int offset);
+/* libphy's PLL setter without the full retune's calibration. Its arguments and where phy_param keeps them
+ * (the crystal selector at byte 49, the int16 trim at byte 30) were found by FPVGateC5MK's disassembly of
+ * libphy (docs/RF_RESEARCH.md there). */
+extern uint8_t phy_param[];
+extern void phy_set_rf_freq_offset(uint8_t xtal_sel, uint32_t mhz, int16_t trim);
 extern int phy_get_noise_floor(void);
 extern int phy_get_rssi(void);
 extern void phy_11p_set(int enable, int mode);
@@ -200,7 +209,31 @@ static bool parse_channel(const char *name, char *label, uint16_t *mhz)
     return true;
 }
 
+/* The command task (tune, gain) and the scan task (hops) both reach the PHY; at the same time they wedged the C5. */
+static SemaphoreHandle_t s_phy;
+
+static void phy_lock(void)
+{
+    if (!s_phy) s_phy = xSemaphoreCreateMutex();
+    xSemaphoreTake(s_phy, portMAX_DELAY);
+}
+
+static void phy_unlock(void)
+{
+    xSemaphoreGive(s_phy);
+}
+
+static esp_err_t tune_locked(const char *name);
+
 esp_err_t radio_tune(const char *name)
+{
+    phy_lock();
+    esp_err_t err = tune_locked(name);
+    phy_unlock();
+    return err;
+}
+
+static esp_err_t tune_locked(const char *name)
 {
     char label[4];
     uint16_t mhz;
@@ -234,7 +267,10 @@ uint16_t radio_mhz(void)
 void radio_set_gain(uint8_t index)
 {
     s_gain = index;
-    if (s_started) phy_force_rx_gain(true, index);
+    if (!s_started) return;
+    phy_lock();
+    phy_force_rx_gain(true, index);
+    phy_unlock();
 }
 
 uint8_t radio_gain(void)
@@ -296,6 +332,7 @@ void radio_set_drive(int data, int clock)
     if (s_clock) apply_drive();
 }
 
+
 esp_err_t radio_iq_start(int every, int q_top, int i_top)
 {
     if (every < 2 || every > 16) return ESP_ERR_INVALID_ARG;
@@ -336,4 +373,51 @@ void radio_iq_stop(void)
         s_clock = NULL;
     }
     lanes_drive_low();
+}
+
+static void lo_hop(uint16_t mhz, int how);
+
+void radio_lo_hop(uint16_t mhz)
+{
+    phy_lock();
+    lo_hop(mhz, 1);
+    phy_unlock();
+}
+
+bool radio_channel_mhz(const char *name, uint16_t *mhz)
+{
+    char label[4];
+    return parse_channel(name, label, mhz);
+}
+
+static void lo_hop(uint16_t mhz, int how)
+{
+    if (how == 0) {
+        phy_set_freq(mhz, 0);
+        return;
+    }
+    int16_t trim;
+    memcpy(&trim, phy_param + 30, sizeof trim);
+    phy_set_rf_freq_offset(phy_param[49], mhz, trim);
+}
+
+/* Moves the LO to mhz and straight back to the tuned channel, n times, by phy_set_freq (how 0) or the PLL
+ * setter alone (how 1): the time each move takes, in us. */
+void radio_hop_time(uint16_t mhz, int n, int how, uint32_t *out_min, uint32_t *out_max, uint32_t *back_min, uint32_t *back_max)
+{
+    *out_min = *back_min = UINT32_MAX;
+    *out_max = *back_max = 0;
+    for (int k = 0; k < n; ++k) {
+        int64_t t0 = esp_timer_get_time();
+        lo_hop(mhz, how);
+        int64_t t1 = esp_timer_get_time();
+        lo_hop(s_mhz, how);
+        int64_t t2 = esp_timer_get_time();
+        uint32_t a = (uint32_t)(t1 - t0), b = (uint32_t)(t2 - t1);
+        if (a < *out_min) *out_min = a;
+        if (a > *out_max) *out_max = a;
+        if (b < *back_min) *back_min = b;
+        if (b > *back_max) *back_max = b;
+        vTaskDelay(1);
+    }
 }
