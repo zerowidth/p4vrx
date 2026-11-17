@@ -22,6 +22,9 @@ bool radio_noise_floor(int *dbm);
  * so 9 and 19 give the top 7 bits of each. */
 esp_err_t radio_iq_start(int every, int q_top, int i_top);
 void radio_iq_stop(void);
+/* Drives the 14 lanes with a fixed pattern, bit 13 on Q7 down to bit 0 on I1 as the P4 reads D13..D0, with the
+ * bus clock running; radio_iq_stop or radio_iq_start ends it. */
+esp_err_t radio_walk(uint16_t pattern);
 void radio_clock_slip(uint32_t us);
 /* Pad drive strength, 0-3, for the data lanes and the clock. */
 void radio_set_drive(int data, int clock);

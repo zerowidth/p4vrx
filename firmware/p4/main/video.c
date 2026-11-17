@@ -19,6 +19,7 @@
 #include "decode.h"
 #include "lcd.h"
 #include "overlay.h"
+#include "selftest.h"
 #include "uvc.h"
 
 /* One held per reader, the newest finished, and one being encoded, so the producer never waits. */
@@ -135,6 +136,14 @@ static void render(uint32_t seq)
     if (mhz) snprintf(lines[9], sizeof lines[9], "chan   %s %u MHz%s", chan, mhz, decode_running() ? "" : ", stopped");
     else snprintf(lines[9], sizeof lines[9], "chan   %s%s", chan, decode_running() ? "" : ", stopped");
 
+    /* A failed self-check takes the top lines. */
+    char failed[4][32];
+    int n = selftest_lines(failed, 4);
+    if (n) {
+        for (int i = 9; i >= n + 1; --i) memcpy(lines[i], lines[i - n - 1], sizeof lines[i]);
+        snprintf(lines[0], sizeof lines[0], "SELF-CHECK FAILED");
+        for (int i = 0; i < n; ++i) memcpy(lines[1 + i], failed[i], sizeof lines[i]);
+    }
     memset(s_raw, 0, s_raw_size);
     for (int i = 0; i < 10; ++i) {
         overlay_text(s_raw, VIDEO_WIDTH, 48, 48 + i * 5 * TEXT_HALVES, TEXT_HALVES, lines[i]);

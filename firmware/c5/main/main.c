@@ -205,6 +205,14 @@ static void run_command(char *line)
         sweep_counts(&hops, &passes);
         if (n < 0) reply("err sweep");
         else reply("ok sweep %d, %lu hops, %lu passes", n, (unsigned long)hops, (unsigned long)passes);
+    } else if (strcmp(argv[0], "walk") == 0 && argc == 2 && strcmp(argv[1], "off") == 0) {
+        radio_iq_stop();
+        reply("ok walk off");
+    } else if (strcmp(argv[0], "walk") == 0 && argc == 2) {
+        unsigned pattern = (unsigned)strtoul(argv[1], NULL, 16) & 0x3fff;
+        esp_err_t err = radio_walk((uint16_t)pattern);
+        if (err == ESP_OK) reply("ok walk %04x", pattern);
+        else reply("err %s", esp_err_to_name(err));
     } else if (strcmp(argv[0], "status") == 0) {
         int rssi = 0, noise = 0;
         bool have_rssi = radio_rssi(&rssi), have_noise = radio_noise_floor(&noise);

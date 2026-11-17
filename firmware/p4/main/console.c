@@ -23,6 +23,7 @@
 #include "decode.h"
 #include "lcd.h"
 #include "screen.h"
+#include "selftest.h"
 #include "iq.h"
 #include "still.h"
 #include "pins.h"
@@ -52,6 +53,7 @@ static void cmd_info(int argc, char **argv)
     const char *reason = r < sizeof reasons / sizeof reasons[0] && reasons[r] ? reasons[r] : "other";
     say("p4vrx %s, chip rev v%d.%d, uptime %lld ms, last reset: %s (%d)\n", esp_app_get_description()->version,
         chip.revision / 100, chip.revision % 100, esp_timer_get_time() / 1000, reason, (int)r);
+    selftest_info();
     bridge_info();
     usb_console_info();
 }
@@ -82,6 +84,7 @@ static const command_t s_commands[] = {
     {"still", still_command, "decodes one field of the last capture (iq 1400000) to 320x240 grey and sends it; inv flips sync polarity"},
     {"usb", usb_command, "the console's USB state; usb suspend reports a suspend the host never sent, to test the recovery"},
     {"pins", pins_command, "pins read lists the Nano-facing pins (lanes pulled down); drive <name> <0|1>, release, or bus on|off"},
+    {"selftest", selftest_command, "stops decoding, checks the C5, its EN and BOOT wires, the bus enable, PCLK and the 14 lanes, and resumes"},
     {"cpu", cpu_command, "cpu [ms] shows each task's share of its core over a window, and each core's idle time"},
     {"c5", c5_command, "c5 hold keeps it in reset; c5 reset runs its app; c5 start also waits for c5rx; c5 boot resets it into its ROM loader; c5 pins reads EN, BOOT, RX and TX with pull-downs; c5 log on|off relays its UART; c5 send talks to c5rx"},
 };

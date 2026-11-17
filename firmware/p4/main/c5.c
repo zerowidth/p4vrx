@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "driver/gpio.h"
+#include "esp_rom_sys.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -214,6 +215,17 @@ void c5_download(void)
     gpio_set_level(PIN_C5_EN, 1);
     vTaskDelay(pdMS_TO_TICKS(BOOT_AFTER_EN_MS));
     gpio_set_level(PIN_C5_BOOT, 1);
+}
+
+void c5_read_wires(int *en, int *boot)
+{
+    gpio_pulldown_en(PIN_C5_EN);
+    gpio_pulldown_en(PIN_C5_BOOT);
+    esp_rom_delay_us(200);
+    *en = gpio_get_level(PIN_C5_EN);
+    *boot = gpio_get_level(PIN_C5_BOOT);
+    gpio_pulldown_dis(PIN_C5_EN);
+    gpio_pulldown_dis(PIN_C5_BOOT);
 }
 
 /* With a pull-down, a pin reads 1 only when a powered C5 pulls or drives it high. */

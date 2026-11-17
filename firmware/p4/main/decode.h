@@ -21,6 +21,8 @@ bool decode_signal(int *level);
  * channel decoded. The picture is lost meanwhile. False if stop() cut it short or the decoder is stopped. */
 bool decode_survey(const char *const *channels, int n, int8_t *levels, bool (*stop)(void));
 void decode_stop(void);
+/* Starts again on the last channel and places the C5's clock, as at power-up. */
+bool decode_resume(void);
 /* Holds the decoder coasting on its line and field counts, drawing nothing and leaving the gain alone, while the C5
  * looks at other channels; false resumes. */
 void decode_hold(bool hold);

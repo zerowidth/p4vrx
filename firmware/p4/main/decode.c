@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Adapted from C5VRX p4usb (reference/p4usb/main/decode.c), by Twotoz and the C5VRX contributors.
 #include "decode.h"
+#include "selftest.h"
 #include "sweep.h"
 
 #include <math.h>
@@ -2190,7 +2191,9 @@ static void autostart_task(void *arg)
         if (nvs_get_str(nvs, "channel", saved, &len) != ESP_OK) saved[0] = '\0';
         nvs_close(nvs);
     }
-    if (saved[0]) {
+    if (!selftest_run()) {
+        say("self-check failed, not decoding; selftest runs it again\n");
+    } else if (saved[0]) {
         strlcpy(s_channel, saved, sizeof s_channel);
         say("decode: starting on %s\n", s_channel);
         if (decode_start(NULL)) place_by_noise();
@@ -2208,6 +2211,13 @@ void decode_autostart(void)
         nvs_flash_init();
     }
     xTaskCreate(autostart_task, "autostart", 8192, NULL, 5, NULL);
+}
+
+bool decode_resume(void)
+{
+    if (!decode_start(NULL)) return false;
+    place_by_noise();
+    return true;
 }
 
 void decode_command(int argc, char **argv)

@@ -1,4 +1,6 @@
-# Startup self-check (sketch, not built)
+# Startup self-check
+
+The P4 side is built (`firmware/p4/main/selftest.c`, c5rx `walk`); the FPGA ID and the Nano-driven lane walk wait for a bitstream with an I2C register file. On the p4vrx boards it passes at power-up in 429 ms, 3 boots of 3 and 8 manual runs of 8 once the pulls had 300 µs to settle; with 20 µs, D10 read as driven on the first run after a reset. A faked open D8 stopped autostart and put "SELF-CHECK FAILED / D8 open" at the top of the LCD's test pattern.
 
 At power-up, before decoding starts, the P4 checks every wire and chip it depends on, then shows what failed. The same checks run on demand with `selftest`. The goal is to tell a loose ribbon, an unpowered C5 or the wrong bitstream apart in a second, rather than finding out from a black picture.
 
@@ -11,7 +13,7 @@ They run in this order; each stops on its first failure and later checks that de
 | C5 alive | `ping` with the check byte, 3 tries of 300 ms, after `c5_run_c5rx` | `ok c5rx` | nothing |
 | C5 EN and BOOT | Read P4 34 and 35 with pull-downs while c5rx runs, as `c5 pins` does | both 1 (the C5's pull-ups) | nothing |
 | FPGA present | I2C read of an ID register at an address clear of the GT911 (0x5D/0x14) | magic and a known build | an I2C target and register file |
-| Bus enable (IRQ wire) | Bus off: the 15 bus pins follow P4 pull-ups then pull-downs. Bus on with I/Q running: they don't | undriven when off, driven when on | nothing (the lockout bitstream already floats them, `pins float`) |
+| Bus enable (IRQ wire) | Bus off: the 14 lanes follow P4 pull-ups then pull-downs (PCLK always reads low from the P4, so it is left out). Bus on with I/Q running: they don't | undriven when off, driven when on | nothing (the lockout bitstream already floats them, `pins float`) |
 | PCLK running | Time a short PARLIO capture, as `iq` does for the bus clock | 13.33 MHz within 0.5% | nothing; a clock-count register would say whether the C5's clock reaches the Nano |
 | Lanes, C5 to P4 | c5rx disconnects the modem from the 14 lanes and drives walking ones, then walking zeros, as GPIO with its clock running; the P4 reads each pattern | 28 patterns match | nothing |
 | Lanes, Nano to P4 | The Nano drives the same patterns itself | 28 patterns match | a pattern source on the lanes, chosen over I2C |

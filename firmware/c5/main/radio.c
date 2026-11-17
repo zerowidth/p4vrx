@@ -354,6 +354,25 @@ esp_err_t radio_iq_start(int every, int q_top, int i_top)
     return err;
 }
 
+esp_err_t radio_walk(uint16_t pattern)
+{
+    if (!s_clock) {
+        lanes_drive_low();
+        esp_err_t err = start_clock(BUS_HZ / 2);
+        if (err != ESP_OK) {
+            radio_iq_stop();
+            return err;
+        }
+        apply_drive();
+    }
+    for (int lane = 0; lane < 14; ++lane) {
+        const gpio_num_t g = LANES[1 + lane].gpio;
+        gpio_set_level(g, pattern >> (13 - lane) & 1);
+        esp_rom_gpio_connect_out_signal(g, SIG_GPIO_OUT_IDX, false, false);
+    }
+    return ESP_OK;
+}
+
 /* Runs the clock one tick of its 240 MHz slow for a while, which moves its edge a tick later against the
  * bus for each period that passes. The bus changes every 3 ticks, and where the edge falls against it is
  * settled at reset; the P4 slips it until it reads the lanes steady. */

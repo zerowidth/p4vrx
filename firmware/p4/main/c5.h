@@ -18,6 +18,8 @@ void c5_run(void);
 /* Pulses EN with BOOT held low, so the C5 enters its ROM loader. */
 void c5_download(void);
 void c5_command(int argc, char **argv);
+/* EN and BOOT against the P4's pull-downs: 1 where the C5 holds them high. */
+void c5_read_wires(int *en, int *boot);
 /* TX to the C5's GPIO 12, attached only while its ROM loader is known to own that pin. */
 void c5_tx_attach(void);
 void c5_tx_detach(void);

@@ -15,7 +15,7 @@ experiment changes them; the ledger and experiment notes keep the history.
 | FPGA toolchain, rake tasks, safe bitstream | [topics/fpga-toolchain.md](topics/fpga-toolchain.md) |
 | P4 firmware: console, C5 bridge, IO supply, wiring check | [topics/p4-firmware.md](topics/p4-firmware.md) |
 | Panel UI, its fonts and the browser simulator | [topics/ui.md](topics/ui.md) |
-| Startup self-check design (not built) | [self-check.md](self-check.md) |
+| Startup self-check: what it checks, what the Nano needs | [self-check.md](self-check.md) |
 | Where the reference firmware came from | [../reference/PROVENANCE.md](../reference/PROVENANCE.md) |
 
 ## Elsewhere in `~/Documents/projects/fpv`
