@@ -22,7 +22,7 @@ def open_console(uart=False):
     s.dtr = s.rts = not uart
     s.open()
     if uart:
-        time.sleep(3)  # the CH343's auto-reset circuit restarts the P4
+        time.sleep(1.5)  # the CH343's auto-reset circuit restarts the P4; the console is up in about 1.2 s
         s.read(65536)
     return s
 

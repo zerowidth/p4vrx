@@ -26,7 +26,7 @@ def main():
     channel = args[1] if len(args) > 1 else "R4"
     s = open_console(uart="-u" in sys.argv)
     every = args[2] if len(args) > 2 else "2"
-    cmd(s, f"iq start {channel} {every}", wait=30)
+    cmd(s, f"iq start {channel} {every}", wait=15)
     cmd(s, f"iq {samples}", wait=10)
     s.write(b"iq dump\r")
     data, buf, end = [], b"", time.time() + samples / 2000 + 30

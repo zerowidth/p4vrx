@@ -46,3 +46,7 @@ At 1 in 6, `iq_start` slips the C5's clock until a capture shows the fewest phas
 At power-up the P4 starts decoding on the last channel started with `decode on`, kept in NVS (namespace `p4vrx`, key `channel`). With none saved it waits for `decode on`.
 
 The LCD (`lcd.c`, adapted from Waveshare's BSP, Apache-2.0) shows each decoded field: the PPA scales it to 630x480 on the panel's left, turns it a quarter turn and converts it to RGB565 in one of three DPI frame buffers, about 12 ms a frame, at 59.8 fps alongside UVC. The 170 px on the right hold the UI ([ui](ui.md)). `lcd` reports rates, `lcd rotate` flips the picture and `lcd grab` sends the frame buffer (`tools/lcdgrab.py`).
+
+## Dev practice: fail fast
+
+The boards come up in about a second or not at all. Wait 3-5 s for a console or a boot, retry once, then stop and look at why. Long sleeps and long polling timeouts only hide the failure. Builds and flashes get timeouts as long as they actually take: tens of seconds.

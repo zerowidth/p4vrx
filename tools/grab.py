@@ -36,7 +36,7 @@ def main():
     channel = args[0] if args else "R4"
     s = open_console(uart="-u" in sys.argv)
     if "--keep" not in sys.argv:
-        cmd(s, f"decode on {channel}", wait=40)
+        cmd(s, f"decode on {channel}", wait=30)
     time.sleep(1)
     cmd(s, "decode")
     s.write(b"video raw\r")

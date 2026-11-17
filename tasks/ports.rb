@@ -84,7 +84,7 @@ def port_for(name, *ids)
   abort "no #{name} port found; plug it in, check #{ids.map { |i| SERIAL_PINS[i] }.compact.uniq.join("/")}, or set PORT"
 end
 
-def wait_for_port(name, id, seconds: 10)
+def wait_for_port(name, id, seconds: 5)
   deadline = Time.now + seconds
   until Time.now > deadline
     found = pinned_ports(usb_ports, id).first

@@ -41,11 +41,11 @@ def fpga_loader_once(args, seconds)
   $?.success? ? :ok : :failed
 end
 
-def fpga_loader(*args, seconds: 120)
+def fpga_loader(*args, seconds: 20)
   result = fpga_loader_once(args, seconds)
   if result == :timeout
     warn "openFPGALoader timed out after #{seconds} s; reconfiguring from flash and retrying"
-    fpga_loader_once(["-r"], 30)
+    fpga_loader_once(["-r"], 10)
     result = fpga_loader_once(args, seconds)
   end
   abort "openFPGALoader #{result}" unless result == :ok
@@ -78,7 +78,7 @@ namespace :fpga do
 
   desc "Write #{FPGA_BITSTREAM} to the Nano's flash (kept across power cycles)"
   task flash: :build do
-    fpga_loader "-f", "--verify", FPGA_BITSTREAM, seconds: 300
+    fpga_loader "-f", "--verify", FPGA_BITSTREAM, seconds: 90
   end
 
   desc "List the cables and FPGA openFPGALoader sees on the Nano"
