@@ -2,7 +2,9 @@
 
 The Nano takes the C5's I/Q at 40 MS/s, demodulates it, and sends the P4 frequency samples at 13.33 MS/s on the same 14-lane bus. The P4 keeps its decoder from the composite onward and drops its phase lookup, difference and despeck. Pass-through stays selectable, so the current path keeps working and the no-FPGA build is unchanged.
 
-Status: design and fixed-point model (`models/fm_demod.py`). No RTL yet.
+Status: design, fixed-point model (`models/fm_demod.py`), and the 40 MHz PLL proven on hardware (`fpga/boards/tangnano20k/fm_top.v`, SRAM only). No demod RTL yet.
+
+PLL test, 2026-11-17: `fm_top` is `lockout_regs_top` plus a PLL taking the lockout's clean clock ×3, with its lock, edges per ms and lock losses in I2C registers (`nano read`). Decoding R4 it held lock at 40,000 edges/ms for 60 s while the lockout took 13,333 C5 clock edges/ms of 13,353-13,367 seen. On dead R2 at gain 77, the noisiest case for the lanes, it held for 30 s with 13,777-13,844 seen: no lock lost after the 6 at boot, when the P4 resets the C5. The 2026-11-16 PLL bitstream, fed the raw C5 clock, lost lock.
 
 ## Why
 
@@ -81,6 +83,5 @@ On four 40 MS/s captures of R4 (2026-11-15 and -16). Error is rms against the fl
 
 ## Open
 
-- Whether the PLL holds on the lockout's clock: the first hardware test.
 - The output scale against the decoder's units: 2.44 kHz is about 1/21 of today's 52 kHz step.
 - Whether 80 MS/s (802.11p off, a wider filter) is worth it later; it needs an 80 MHz PLL output and the same PLL phase search.

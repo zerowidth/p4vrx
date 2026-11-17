@@ -9,3 +9,4 @@ bool selftest_failed(void);
 int selftest_lines(char lines[][32], int max);
 void selftest_info(void);
 void selftest_command(int argc, char **argv);
+void nano_command(int argc, char **argv);

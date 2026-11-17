@@ -2,6 +2,7 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "driver/gpio.h"
@@ -146,7 +147,7 @@ static bool check_nano(void)
     uint8_t id[4];
     if (!nano_read(REG_ID, id, 4)) return fail(NANO, "no answer at 0x42 (old bitstream?)");
     if (id[0] != 'P' || id[1] != 'V') return fail(NANO, "0x42 is not the Nano: %02x %02x", id[0], id[1]);
-    if (id[2] != NANO_BUILD) return fail(NANO, "Nano build %u, want %u", id[2], NANO_BUILD);
+    if (id[2] < NANO_BUILD) return fail(NANO, "Nano build %u, want %u or later", id[2], NANO_BUILD);
     if (!(id[3] & 1)) return fail(NANO, "Nano PLL not locked");
     return pass(NANO);
 }
@@ -351,6 +352,33 @@ void selftest_info(void)
     for (int k = 0; k < N_CHECKS; ++k)
         if (s_checks[k].state == CHECK_FAILED) say(" %s: %s;", s_checks[k].name, s_checks[k].detail);
     say("\n");
+}
+
+/* nano read <reg> [n] | nano write <reg> <byte>...: the Nano's registers, in hex. */
+void nano_command(int argc, char **argv)
+{
+    if (!s_nano) check_nano();
+    if (!s_nano) {
+        say("err no Nano at 0x42\n");
+        return;
+    }
+    if (argc > 2 && strcmp(argv[1], "read") == 0) {
+        uint8_t reg = (uint8_t)strtoul(argv[2], NULL, 16), data[32];
+        int n = argc > 3 ? atoi(argv[3]) : 1;
+        n = n < 1 ? 1 : n > 32 ? 32 : n;
+        if (!nano_read(reg, data, n)) {
+            say("err read\n");
+            return;
+        }
+        for (int k = 0; k < n; ++k) say("%02x%s", data[k], k + 1 < n ? " " : "\n");
+    } else if (argc > 3 && strcmp(argv[1], "write") == 0) {
+        uint8_t reg = (uint8_t)strtoul(argv[2], NULL, 16), data[3];
+        int n = argc - 3 > 3 ? 3 : argc - 3;
+        for (int k = 0; k < n; ++k) data[k] = (uint8_t)strtoul(argv[3 + k], NULL, 16);
+        say(nano_write(reg, data, n) ? "ok\n" : "err write\n");
+    } else {
+        say("nano read <reg> [n] | nano write <reg> <byte>...\n");
+    }
 }
 
 void selftest_command(int argc, char **argv)
