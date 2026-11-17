@@ -2,7 +2,9 @@
 
 Move the analog decoder from the P4 into the Nano in three stages, within the ceiling in [the budget](fpga-budget.md): 6,600 LUT4, 4,400 flops, 18 block RAMs, 4.5 DSP macros (18 MULT9), no PLL, and the SDRAM. At the end the Nano sends finished 720x480 frames, and the P4 does display, UI, UVC and the encoder.
 
-Status: design. No model or RTL yet.
+Status: stage 1 modelled (`models/cvbs_sync.py`, the P4 decoder's slicer, line clock, vsync and levels in integers). No RTL yet.
+
+Stage 1 model, on a 200 ms capture of R4 (`iq grab 8000000`, 2026-11-17) turned into the P4's fm-mode phase steps through `models/fm_demod.py`: after the first two fields it held 253 and 254 hsyncs on alternate fields (the P4 decoder read 253 and 254 at the time), a vsync every field, alternating parity, and a line of 847.41-847.44 samples against the decoder's 847.39.
 
 ## Where it starts
 
@@ -19,9 +21,9 @@ RTL ported from that code stays GPL-3.0 with the C5VRX credit, as the repo's lic
 
 Port the slicer, line clock, vsync and parity to the Nano on the 13.33 MS/s frequency stream, the same algorithm and constants as the P4's.
 
-- Out: the composite, line-locked. Each line is resampled to 858 samples (BT.601's 13.5 MHz, 720 active) by a 4-tap cubic interpolator on the line clock's fraction: 4 MULT9, a coefficient table in 1 block RAM.
-- On the bus: 14-bit samples at 13.5 MHz with the line's first sample and the field's first line flagged in the low bits.
-- The P4 skips its sync and line clock and keeps its chroma, luma and deinterlace on lines it no longer has to find.
+- Out, as refined: the same 13.33 MS/s phase stream the P4 takes now, delayed about 1,000 samples (1 block RAM) so the line clock's verdict on each line can be marked on the line's first sample. The low six bits, the radius code today, carry a line-start flag, the half-sample bit of the line's fraction, field start, parity and hit while decoding; during a scan, when the decoder is held, they carry the radius code as now. The P4 tells the Nano which over I2C.
+- Resampling to 858 samples a line moves to stage 2, where chroma needs it; keeping 13.33 MS/s leaves the P4's chroma (189/704 of the sample rate) and luma as they are.
+- The P4 replaces its slicer and line clock with a scan for markers and keeps its chroma, luma and deinterlace.
 - Estimate: 1,500 LUT4, 1,200 flops, 2 block RAM, 1 DSP macro.
 
 ## Stage 2: chroma and luma
