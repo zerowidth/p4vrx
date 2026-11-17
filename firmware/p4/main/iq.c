@@ -140,8 +140,10 @@ esp_err_t iq_new_rx(size_t max_recv_size, parlio_rx_unit_handle_t *ret)
     };
     for (int k = 0; k < 16; ++k) cfg.data_gpio_nums[k] = -1;
     if (s_phase_lanes) {
-        /* The Nano's phase: D13..D6 as the high byte, where the decoder takes its phase byte, D5..D0 below. */
-        for (int k = 0; k < 14; ++k) cfg.data_gpio_nums[2 + k] = bus_lane_gpio(13 - k);
+        /* The Nano's phase, D13..D6, as the high byte, where the decoder takes its phase byte; its radius code
+         * and clip flag, D5..D0, in the low byte's bits 5..0, where the scan takes the BitScrambler's. */
+        for (int k = 0; k < 6; ++k) cfg.data_gpio_nums[k] = bus_lane_gpio(13 - k);
+        for (int k = 0; k < 8; ++k) cfg.data_gpio_nums[8 + k] = bus_lane_gpio(7 - k);
         return parlio_new_rx_unit(&cfg, ret);
     }
     for (int k = 1; k <= 7; ++k) {

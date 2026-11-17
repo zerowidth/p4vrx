@@ -354,6 +354,14 @@ void selftest_info(void)
     say("\n");
 }
 
+bool nano_magnitude(int *magnitude)
+{
+    uint8_t m[2];
+    if (!nano_read(0x12, m, 2)) return false;
+    *magnitude = m[0] | m[1] << 8;
+    return true;
+}
+
 bool nano_control(uint8_t control)
 {
     if (!s_nano) check_nano();

@@ -17,3 +17,5 @@ void nano_command(int argc, char **argv);
 #define NANO_FM 4
 #define NANO_TRACK_OFFSETS 8
 bool nano_control(uint8_t control);
+/* fm_top's mean CORDIC magnitude over the last 32768 samples. */
+bool nano_magnitude(int *magnitude);

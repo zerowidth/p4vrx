@@ -216,6 +216,8 @@ static bool s_despeck = true;
 /* The Nano demodulates (fm_top's control bit 2) and the ring holds its 14-bit frequencies, 2.44 kHz an LSB,
  * rather than the BitScrambler's phase bytes; the gain stays where it is set. */
 static bool s_fm;
+/* The Nano's magnitude is the radius x 4 x 1.6468 / 32. */
+#define FM_RADIUS_PER_MAGNITUDE 4.858f
 static bool s_low;
 static uint32_t s_low_start;
 static int32_t s_thr_lo, s_thr_hi;
@@ -470,9 +472,25 @@ static bool s_gain_settling;
 /* Every CONTROL_MS: steer the C5's gain and re-centre the phase table on the I/Q offset. The BitScrambler's
  * bytes carry no raw I/Q. Power comes from I's magnitude code, and the offset from the balance of the sign
  * bits: a carrier circling its centre spends half its time on each side. */
+/* In fm mode the lanes carry no I/Q: the radius comes from the Nano's mean CORDIC magnitude. Nothing reports
+ * clipping, so a radius near the lanes' full scale stands for it. */
+#define FM_CLIP_RADIUS 110
+
+static void control_fm(void)
+{
+    int magnitude;
+    if (s_survey || !nano_magnitude(&magnitude)) return;
+    s_rms = (int)lrintf(magnitude * FM_RADIUS_PER_MAGNITUDE);
+    s_clip_permille = s_rms > FM_CLIP_RADIUS ? CLIP_PERMILLE_HEAVY + 1 : 0;
+    steer_gain(true);
+}
+
 static void control(void)
 {
-    if (s_fm) return;
+    if (s_fm) {
+        control_fm();
+        return;
+    }
     if (s_bs_broken) {
         s_bs_broken = s_bs_pending = false;
         decode_stop();
@@ -1547,11 +1565,17 @@ static int marked_lanes(const uint8_t *b, uint32_t words)
 /* Demodulates a node's two bytes a sample; bytes is what the DMA wrote of the node. The marked
  * byte is on the even addresses from the first EOF after a start, and on the odd ones before it and from
  * each halt to the next EOF. */
+/* Power for each of the Nano's radius codes, in the units of s_bs_power: the square of the code's centre. */
+static uint32_t s_fm_power[32];
+
 /* The Nano's phase, high byte of each word, differenced as the BitScrambler's is. */
 static void process_fm(const uint8_t *b, uint32_t bytes)
 {
     uint32_t words = (bytes / 2) & ~15u;
     uint32_t n = s_n;
+    if (!s_fm_power[1])
+        for (int c = 0; c < 32; ++c) s_fm_power[c] = (uint32_t)lrintf(powf((c + 0.5f) * FM_RADIUS_PER_MAGNITUDE, 2));
+    sweep_take(b, words, n, true, s_fm_power);
     for (uint32_t done = 0; done < words;) {
         uint32_t at = n % HIST, run = words - done < HIST - at ? words - done : HIST - at;
         bs_demod(b + 2 * done, s_hist + at, s_blocks + at / 4, run / 16, &s_prev_phase, 1);

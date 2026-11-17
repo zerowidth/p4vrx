@@ -6,7 +6,8 @@
 //   0x0e times the 40 MHz PLL lost lock, saturating at 255
 //   0x08 control bit 2: the lanes carry FM demod with PCLK from the 40 MHz clock divided by 3, as a 14-bit phase
 //        that sums 3 x each 14-bit frequency (2.44 kHz an LSB): D13..D6 are the P4 decoder's 8-bit phase,
-//        1/256 turn at 13.33 MS/s, and D5..D0 its fraction; bit 3: track the I/Q offsets rather than use 0x10-0x11
+//        1/256 turn at 13.33 MS/s; D4..D0 the sample's radius in steps of 4.86 lane units, to 31, and D5 set
+//        from a radius of 121, where the lanes clip; bit 3: track the I/Q offsets rather than use 0x10-0x11
 //   0x10-0x11 I and Q offsets, signed, as the lanes read 2v+1; reads give the ones in use
 //   0x12-0x13 mean CORDIC magnitude over the last 32768 samples, low byte first (holding the high byte)
 // lockout_regs_top's description:
@@ -102,7 +103,12 @@ module fm_top #(
     wire signed [13:0] fm_out;
     wire [8:0] magnitude;
     reg [13:0] fm_phase = 0;
-    always @(posedge clk40) if (third == 2) fm_phase <= fm_phase + fm_out * 3;
+    reg [5:0] fm_radius = 0;
+    always @(posedge clk40)
+        if (third == 2) begin
+            fm_phase <= fm_phase + fm_out * 3;
+            fm_radius <= {magnitude >= 9'd25, magnitude > 9'd31 ? 5'd31 : magnitude[4:0]};
+        end
     fm_demod demod (
         .clk(clk40), .in_i(lanes40[6:0]), .in_q(lanes40[13:7]), .dc_i(dc_i), .dc_q(dc_q),
         .take(third == 1), .out(fm_out), .magnitude(magnitude)
@@ -232,6 +238,6 @@ module fm_top #(
     wire fm = control[2] && !control[0];
     wire drive = own_clock || fm ? en27[1] : en[1];
     assign p4_pclk = drive ? (own_clock ? ~half : fm ? pclk_fm : ~q) : 1'bz;
-    assign p4_d    = drive ? (control[0] ? pattern : fm ? fm_phase : lanes) : 14'bz;
+    assign p4_d    = drive ? (control[0] ? pattern : fm ? {fm_phase[13:6], fm_radius} : lanes) : 14'bz;
 
 endmodule
