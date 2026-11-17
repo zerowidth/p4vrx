@@ -23,3 +23,7 @@ CONFIG_COMPILER_OPTIMIZATION_PERF=y
 # core 0 for about 5 ms per frame; in 32 KB chunks the decoder's drawing task gets in between.
 CONFIG_ESP_MM_CACHE_MSYNC_C2M_CHUNKED_OPS=y
 CONFIG_ESP_MM_CACHE_MSYNC_C2M_CHUNKED_OPS_MAX_LEN=0x8000
+
+# Per-task run time for the `cpu` command.
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
