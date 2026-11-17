@@ -71,6 +71,10 @@ static uint32_t s_convert_us;
 static volatile bool s_want_key;
 /* `video encode off` stops the encoder, to see what it costs the decoder. */
 static volatile bool s_encode = true;
+/* 0 runs the LCD's PPA pass and the encoder at once; 1 encodes once the PPA is done; 2 offers the LCD the field once encoded. */
+static volatile int s_stagger;
+/* The LCD gets every Nth field. */
+static volatile int s_lcd_every = 1;
 
 #define NOTIFY_TICK 1
 #define NOTIFY_FIELD 2
@@ -209,10 +213,13 @@ static void video_task(void *arg)
             gray_to_yuv420(raw);
             raw = s_yuv420;
         }
-        lcd_offer(raw);
+        bool to_lcd = s_lcd_every <= 1 || seq % s_lcd_every == 0;
+        if ((s_stagger != 2 || !s_encode) && to_lcd) lcd_offer(raw);
+        if (s_stagger == 1 && s_encode && to_lcd) lcd_wait_scaled(20);
         int64_t t1 = esp_timer_get_time();
         if (!s_encode) continue;
         encode(raw, true, seq, t0);
+        if (s_stagger == 2 && to_lcd) lcd_offer(raw);
         int64_t t2 = esp_timer_get_time();
         s_render_us = t1 - t0;
         s_encode_us = t2 - t1;
@@ -391,6 +398,14 @@ void video_command(int argc, char **argv)
 {
     if (argc > 1 && strcmp(argv[1], "grab") == 0) {
         grab();
+        return;
+    }
+    if (argc > 2 && strcmp(argv[1], "lcd") == 0) {
+        s_lcd_every = atoi(argv[2]);
+        return;
+    }
+    if (argc > 2 && strcmp(argv[1], "stagger") == 0) {
+        s_stagger = atoi(argv[2]);
         return;
     }
     if (argc > 2 && strcmp(argv[1], "encode") == 0) {

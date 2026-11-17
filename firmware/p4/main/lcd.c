@@ -284,6 +284,8 @@ static void clear(void *fb)
 }
 
 /* Scales and turns a frame into the back buffer, then shows it from the next refresh on. */
+static SemaphoreHandle_t s_scaled;
+
 static void show(const uint8_t *yuv)
 {
     void *fb = s_fb[s_back];
@@ -298,7 +300,9 @@ static void show(const uint8_t *yuv)
         .scale_y = 1.0f,
         .mode = PPA_TRANS_MODE_BLOCKING,
     };
-    if (ppa_do_scale_rotate_mirror(s_srm, &srm) != ESP_OK) return;
+    esp_err_t err = ppa_do_scale_rotate_mirror(s_srm, &srm);
+    xSemaphoreGive(s_scaled);
+    if (err != ESP_OK) return;
     s_ppa_us = esp_timer_get_time() - t0;
     if (s_strip_stale & 1 << s_back && xSemaphoreTake(s_strip_lock, 0) == pdTRUE) {
         copy_strip(fb);
@@ -352,6 +356,7 @@ static void lcd_task(void *arg)
 void lcd_init(void)
 {
     s_vsync = xSemaphoreCreateBinary();
+    s_scaled = xSemaphoreCreateBinary();
     backlight_on();
     panel_init();
     const ppa_client_config_t srm = {.oper_type = PPA_OPERATION_SRM};
@@ -379,9 +384,15 @@ void lcd_hold(bool hold)
     s_paused = hold;
 }
 
+bool lcd_wait_scaled(uint32_t ms)
+{
+    return s_scaled && xSemaphoreTake(s_scaled, pdMS_TO_TICKS(ms)) == pdTRUE;
+}
+
 void lcd_offer(const uint8_t *yuv)
 {
     if (!s_task || s_paused) return;
+    if (s_scaled) xSemaphoreTake(s_scaled, 0);
     ++s_offered;
     s_pending = yuv;
     xTaskNotifyGive(s_task);

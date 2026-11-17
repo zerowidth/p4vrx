@@ -8,6 +8,8 @@
 void lcd_init(void);
 /* A 720x480 frame in the encoder's packed 4:2:0, for the panel; it must stay valid for a field. */
 void lcd_offer(const uint8_t *yuv);
+/* Waits up to ms for the PPA to finish with the last frame offered; false if it didn't. */
+bool lcd_wait_scaled(uint32_t ms);
 void lcd_command(int argc, char **argv);
 /* Keeps the last frame on the panel while true; the strip still updates. */
 void lcd_hold(bool hold);
