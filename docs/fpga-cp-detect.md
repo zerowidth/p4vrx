@@ -1,6 +1,15 @@
 # HDZero detector in the Nano (phase 4, first step)
 
-An always-on detector beside the FM demod that says whether the channel carries HDZero, from its OFDM cyclic prefix, so the receiver can switch modes by itself. Status: design and model (`models/cp_detect.py`); no RTL.
+An always-on detector beside the FM demod that says whether the channel carries HDZero, from its OFDM cyclic prefix, so the receiver can switch modes by itself. Status: running in the Nano (`fpga/rtl/cp_detect.v` in `fm_top`, build 3, in its flash), bit for bit with `nano_fold` in `models/cp_detect.py` (`models/cp_detect_check.py`: 2-4 decisions each on two HDZero captures and an analog one). Wide-band lag only. On the P4: `hdz`, an `event` line on each change, the HDZERO badge, and `iq grab` for raw 40 MS/s I/Q.
+
+## Using it
+
+- `hdz` prints one line: `hdzero=0|1 score=… peak_bin=… decisions=… ch=…`. `info` includes it.
+- When the state changes the console prints `event hdzero=1 score=3.84 ch=R8` (or `hdzero=0`), unasked, to whichever console last sent a command.
+- The P4 reads the detector every 100 ms. Three reads in a row over 2.2 turn detection on (0.3 s), two under 1.6 turn it off.
+- False triggers, 2026-11-17: 2.5 minutes each on live analog R4 (248 reads, median 1.22, max 1.34) and dead R2 at gain 77 (246 reads, median 1.20, max 2.98, two over 2.2, not in a row): no events. The isolated highs on R2 fit a burst of other traffic filling a few bins of one window.
+- While detected, the strip shows the HDZERO badge and a LINK bar from the score (2.2-5 as 40-100%). There is no HDZero decode yet; the picture stays whatever the analog decoder makes of it.
+- `iq grab [samples]` (default 1.4M, up to 8M) pauses the decoder's receive, has the Nano send its 40 MS/s lane samples with PCLK at 40 MHz (control bit 4), captures them, and restarts the receive with no retune or placement: 29 ms for 1M samples. Its reply carries `samples rate ch mhz gain hdzero score paused_ms`; `iq dump` then sends the samples, base64, as `tools/iqcap.py` reads them. A grab of analog R4 had its line every 2,542 samples, as at 40 MS/s.
 
 ## What it looks for
 
@@ -41,17 +50,19 @@ With 64 symbols and a threshold of 2.2, every HDZero decision is above 3.1 and e
 
 | Block | Use |
 | --- | --- |
-| 1517-sample delay of 14-bit I/Q | 21 kbit: 2 BSRAM |
-| 48-sample moving sum of products | 3-4 multipliers (9×9), a 48-deep delay of 2 × 15 bits in registers or 1 BSRAM |
-| 1565-bin fold, 24 bits each | 38 kbit: 3 BSRAM, read-modify-write a sample at 40 MHz |
+| 1517-sample delay of 16-bit I/Q | 2 BSRAM |
+| 48-sample moving sum of products | a 48-deep chain of 2 × 17 bits in flops (as BSRAM its address missed hold by 0.12 ns), multipliers |
+| Two 1565-bin folds of 32 bits, ping-pong | 6 BSRAM |
 | Phase counter, peak and sum pass, registers | a few hundred LUTs |
+
+As built, `fm_top` with the detector: 10 of 46 BSRAM, 22% of flops, the 40 MHz domain closing at 71 MHz.
 
 It runs on the FM demod's 40 MHz clock and the same lane samples, so it adds no PLL. The narrowband lag (2409) needs either a second delay (2 more BSRAM) or the two lags taking turns per decision.
 
 ## On the bus and the P4
 
-- I2C registers: the last ratio (8.8 fixed point), a detected flag with hysteresis (two decisions over 2.2 to set, two under 1.6 to clear), the bin of the peak (the symbol timing, useful to the PHY later), and the lag in use.
-- The P4 reads them every 100 ms or so. On detection it switches the C5's gain to HDZero's fixed ~58 and the UI to HDZero; the analog decoder keeps running until the switch.
+- As built, `fm_top` registers 0x14-0x1f: the fold's peak and total (32 bits each), the peak's bin and the decision count (16 bits each), low bytes first; reading 0x14 holds them all for the reads that follow. The P4 does the ratio and the hysteresis.
+- Later, on detection: the C5's gain to HDZero's fixed ~58, and the HDZero decoder.
 
 ## Verification
 

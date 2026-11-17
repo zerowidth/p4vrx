@@ -28,6 +28,7 @@
 #include "decode.h"
 #include "pins.h"
 #include "selftest.h"
+#include "hdz.h"
 
 #define BUS_HZ 80000000
 /* Two NTSC fields at 40 MS/s, so a whole field is in every capture. */
@@ -731,11 +732,43 @@ static void rate_test(int argc, char **argv)
     if (strcmp(cmd, "link q 13") == 0) c5_request("link off", reply, sizeof reply, 1000);
 }
 
+/* Raw 40 MS/s I/Q from the Nano's PLL samples, with the C5 left as it is and decoding paused only for the capture;
+ * `iq dump` sends it. */
+static void grab(int n)
+{
+    if (n <= 0 || n > MAX_SAMPLES) n = CAPTURE_SAMPLES;
+    if (!nano_has_fm()) {
+        say("err grab needs the Nano's fm_top\n");
+        return;
+    }
+    float score;
+    bool hdz = hdz_detected(&score);
+    int64_t t0 = esp_timer_get_time();
+    bool was = decode_rx_pause();
+    int every = s_every;
+    nano_control(NANO_RAW40);
+    s_every = 2;
+    bus_enable(true);
+    esp_err_t err = capture(s_psram, n, PARLIO_SAMPLE_EDGE_POS);
+    s_every = every;
+    nano_control(0);
+    if (was) decode_rx_resume();
+    unsigned mhz;
+    const char *ch = iq_channel(&mhz);
+    if (err != ESP_OK) say("err grab: %s\n", esp_err_to_name(err));
+    else say("ok grab samples=%d rate=40000000 ch=%s mhz=%u gain=%d hdzero=%d score=%.2f paused_ms=%lld\n", n, ch, mhz,
+             decode_gain(), hdz, (double)score, (esp_timer_get_time() - t0) / 1000);
+}
+
 void iq_command(int argc, char **argv)
 {
     if (!prepare()) return;
     const char *sub = argc > 1 ? argv[1] : "";
     /* The decoder owns the one PARLIO RX unit while it runs. */
+    if (strcmp(sub, "grab") == 0) {
+        grab(argc > 2 ? atoi(argv[2]) : 0);
+        return;
+    }
     if (strcmp(sub, "dump") != 0) decode_stop();
     if (strcmp(sub, "start") == 0) {
         iq_start(argc > 2 ? argv[2] : "R4", argc > 3 ? atoi(argv[3]) : 2);

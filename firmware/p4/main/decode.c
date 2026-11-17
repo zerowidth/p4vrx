@@ -2292,6 +2292,18 @@ void decode_autostart(void)
     xTaskCreate(autostart_task, "autostart", 8192, NULL, 5, NULL);
 }
 
+bool decode_rx_pause(void)
+{
+    bool was = s_rx && s_running;
+    decode_stop();
+    return was;
+}
+
+void decode_rx_resume(void)
+{
+    start_rx();
+}
+
 bool decode_resume(void)
 {
     if (!decode_start(NULL)) return false;

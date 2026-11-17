@@ -24,6 +24,7 @@
 #include "lcd.h"
 #include "screen.h"
 #include "selftest.h"
+#include "hdz.h"
 #include "iq.h"
 #include "still.h"
 #include "pins.h"
@@ -54,6 +55,7 @@ static void cmd_info(int argc, char **argv)
     say("p4vrx %s, chip rev v%d.%d, uptime %lld ms, last reset: %s (%d)\n", esp_app_get_description()->version,
         chip.revision / 100, chip.revision % 100, esp_timer_get_time() / 1000, reason, (int)r);
     selftest_info();
+    hdz_info();
     bridge_info();
     usb_console_info();
 }
@@ -76,7 +78,7 @@ static const command_t s_commands[] = {
     {"help", cmd_help, "list commands"},
     {"info", cmd_info, "firmware version, chip revision, uptime and bridge counters"},
     {"reboot", cmd_reboot, "restart the P4; reboot download enters its ROM loader"},
-    {"iq", iq_command, "iq [samples] captures the bus and prints levels; start [channel [every]] sets the C5 up; edge judges the sampling; dump sends the capture"},
+    {"iq", iq_command, "iq [samples] captures the bus and prints levels; grab [samples] takes raw 40 MS/s I/Q from the Nano while decoding carries on; start [channel [every]] sets the C5 up; edge judges the sampling; dump sends the capture"},
     {"decode", decode_command, "decode on [channel] tunes the C5 and decodes NTSC continuously; off stops; alone shows lock and load"},
     {"video", video_command, "frame and H.264 stats; grab sends the newest access unit, raw the newest decoded 720x480 frame; bitrate N; encode on|off|auto (auto, the default, only while a UVC host streams); stagger 0|1|2|auto orders the LCD and encoder; lcd N|auto gives the LCD every Nth field (auto: every other one while UVC streams)"},
     {"lcd", lcd_command, "the panel's frame rate and timings; rotate turns the picture half a turn"},
@@ -85,6 +87,7 @@ static const command_t s_commands[] = {
     {"usb", usb_command, "the console's USB state; usb suspend reports a suspend the host never sent, to test the recovery"},
     {"pins", pins_command, "pins read lists the Nano-facing pins (lanes pulled down); drive <name> <0|1>, release, or bus on|off"},
     {"selftest", selftest_command, "stops decoding, checks the C5, its EN and BOOT wires, the bus enable, PCLK and the 14 lanes, and resumes"},
+    {"hdz", hdz_command, "the HDZero detector, one key=value line: hdzero, score, peak_bin, decisions, ch; changes also print `event hdzero=...`"},
     {"nano", nano_command, "nano read <reg> [n] | nano write <reg> <byte>...: the Nano's I2C registers, in hex"},
     {"cpu", cpu_command, "cpu [ms] shows each task's share of its core over a window, and each core's idle time"},
     {"c5", c5_command, "c5 hold keeps it in reset; c5 reset runs its app; c5 start also waits for c5rx; c5 boot resets it into its ROM loader; c5 pins reads EN, BOOT, RX and TX with pull-downs; c5 log on|off relays its UART; c5 send talks to c5rx"},

@@ -16,6 +16,7 @@ void nano_command(int argc, char **argv);
 #define NANO_OWN_CLOCK 2
 #define NANO_FM 4
 #define NANO_TRACK_OFFSETS 8
+#define NANO_RAW40 16
 bool nano_control(uint8_t control);
 /* fm_top's mean CORDIC magnitude over the last 32768 samples. */
 bool nano_magnitude(int *magnitude);
@@ -23,3 +24,5 @@ bool nano_magnitude(int *magnitude);
 bool nano_has_fm(void);
 /* fm_top's 40 MHz PLL phase, 0-15. */
 bool nano_pll_phase(int phase);
+/* The HDZero detector's last decision (Nano build 3 or later). */
+bool nano_hdz(uint32_t *peak, uint32_t *total, uint16_t *bin, uint16_t *decisions);

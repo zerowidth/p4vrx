@@ -16,6 +16,7 @@
 #include "lcd.h"
 #include "sweep.h"
 #include "touch.h"
+#include "hdz.h"
 #include "ui.h"
 #include "uvc.h"
 
@@ -169,6 +170,14 @@ static void screen_task(void *arg)
         strlcpy(st.channel, decode_channel(&mhz), sizeof st.channel);
         st.mhz = (uint16_t)mhz;
         st.locked = decode_signal(&st.level);
+        static int polls;
+        if (++polls % 5 == 0) hdz_poll();
+        float score;
+        if (hdz_detected(&score)) {
+            /* No HDZero decode yet: the badge and the detector's strength, 2.2 to 5 as 40-100%. */
+            st.mode = UI_HDZERO;
+            st.link_quality = (int)(score * 20) > 100 ? 100 : (int)(score * 20);
+        }
         st.usb = uvc_streaming() ? UI_USB_STREAMING : uvc_mounted() ? UI_USB_CONNECTED : UI_USB_NONE;
         follow_touch();
         follow_scan();

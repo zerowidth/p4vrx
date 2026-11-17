@@ -365,6 +365,18 @@ bool nano_pll_phase(int phase)
     return nano_write(0x0b, &p, 1);
 }
 
+bool nano_hdz(uint32_t *peak, uint32_t *total, uint16_t *bin, uint16_t *decisions)
+{
+    uint8_t r[12], id[3];
+    if (!s_nano) check_nano();
+    if (!nano_read(REG_ID, id, 3) || id[0] != 'P' || id[1] != 'V' || id[2] < 3 || !nano_read(0x14, r, 12)) return false;
+    *peak = r[0] | r[1] << 8 | r[2] << 16 | (uint32_t)r[3] << 24;
+    *total = r[4] | r[5] << 8 | r[6] << 16 | (uint32_t)r[7] << 24;
+    *bin = r[8] | r[9] << 8;
+    *decisions = r[10] | r[11] << 8;
+    return true;
+}
+
 bool nano_has_fm(void)
 {
     uint8_t id[3];
