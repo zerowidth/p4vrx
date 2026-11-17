@@ -216,6 +216,12 @@ bool uvc_mounted(void)
     return tud_mounted();
 }
 
+/* macOS can leave the stream open with nobody reading, which looks like every frame refused. */
+bool uvc_taking(void)
+{
+    return uvc_streaming() && s_refused_run < SILENT_FRAMES / 4;
+}
+
 bool uvc_streaming(void)
 {
     return tud_mounted() && tud_video_n_streaming(0, 0);

@@ -10,6 +10,8 @@ void lcd_init(void);
 void lcd_offer(const uint8_t *yuv);
 /* Waits up to ms for the PPA to finish with the last frame offered; false if it didn't. */
 bool lcd_wait_scaled(uint32_t ms);
+/* Whether the last field offered is still waiting for, or in, the PPA. */
+bool lcd_busy(void);
 void lcd_command(int argc, char **argv);
 /* Keeps the last frame on the panel while true; the strip still updates. */
 void lcd_hold(bool hold);

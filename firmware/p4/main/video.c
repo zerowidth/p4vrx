@@ -75,9 +75,9 @@ static volatile bool s_want_key;
 typedef enum { ENCODE_OFF, ENCODE_ON, ENCODE_AUTO } encode_mode_t;
 static volatile encode_mode_t s_encode = ENCODE_AUTO;
 /* 0 runs the LCD's PPA pass and the encoder at once; 1 encodes once the PPA is done; 2 offers the LCD the field once encoded. */
-static volatile int s_stagger;
+static volatile int s_stagger = -1;
 /* The LCD gets every Nth field. */
-static volatile int s_lcd_every = 1;
+static volatile int s_lcd_every;
 
 #define NOTIFY_TICK 1
 #define NOTIFY_FIELD 2
@@ -225,17 +225,29 @@ static void video_task(void *arg)
             raw = s_yuv420;
         }
         static bool idle;
-        bool encoding = s_encode == ENCODE_ON || (s_encode == ENCODE_AUTO && uvc_streaming());
+        /* With the stream open but nobody reading, one field in 30 still goes out to notice a reader coming back. */
+        static uint32_t fields;
+        ++fields;
+        bool taking = uvc_taking();
+        bool encoding = s_encode == ENCODE_ON ||
+                        (s_encode == ENCODE_AUTO && uvc_streaming() && (taking || fields % 30 == 0));
         /* The encoder's reference is stale after a pause, so it restarts on a keyframe. */
         if (encoding && idle) s_want_key = true;
         idle = !encoding;
-        bool to_lcd = s_lcd_every <= 1 || seq % s_lcd_every == 0;
-        if ((s_stagger != 2 || !encoding) && to_lcd) lcd_offer(raw);
-        if (s_stagger == 1 && encoding && to_lcd) lcd_wait_scaled(20);
+        /* Auto (0 and -1): UVC gets every field; while it streams the LCD takes every other one, scaled before the
+         * encoder runs, since the two at once share PSRAM bandwidth and both fall to 58 fps. */
+        bool busy = s_encode == ENCODE_ON || taking;
+        /* -1: after each encode, the LCD takes the field if the PPA has finished the last. */
+        bool adaptive = s_lcd_every < 0 && busy;
+        int every = adaptive ? 1 : s_lcd_every > 0 ? s_lcd_every : busy ? 2 : 1;
+        int stagger = adaptive ? 2 : s_stagger >= 0 ? s_stagger : busy ? 1 : 0;
+        bool to_lcd = every <= 1 || seq % every == 0;
+        if ((stagger != 2 || !encoding) && to_lcd) lcd_offer(raw);
+        if (stagger == 1 && encoding && to_lcd) lcd_wait_scaled(20);
         int64_t t1 = esp_timer_get_time();
         if (!encoding) continue;
         encode(raw, true, seq, t0);
-        if (s_stagger == 2 && to_lcd) lcd_offer(raw);
+        if (stagger == 2 && to_lcd && !(adaptive && lcd_busy())) lcd_offer(raw);
         int64_t t2 = esp_timer_get_time();
         s_render_us = t1 - t0;
         s_encode_us = t2 - t1;
@@ -417,11 +429,11 @@ void video_command(int argc, char **argv)
         return;
     }
     if (argc > 2 && strcmp(argv[1], "lcd") == 0) {
-        s_lcd_every = atoi(argv[2]);
+        s_lcd_every = strcmp(argv[2], "auto") == 0 ? 0 : strcmp(argv[2], "adaptive") == 0 ? -1 : atoi(argv[2]);
         return;
     }
     if (argc > 2 && strcmp(argv[1], "stagger") == 0) {
-        s_stagger = atoi(argv[2]);
+        s_stagger = strcmp(argv[2], "auto") == 0 ? -1 : atoi(argv[2]);
         return;
     }
     if (argc > 2 && strcmp(argv[1], "encode") == 0) {

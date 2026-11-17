@@ -11,3 +11,5 @@ void uvc_info(void);
 /* Whether a host has enumerated the camera, and whether it is taking frames. */
 bool uvc_mounted(void);
 bool uvc_streaming(void);
+/* Streaming, and the host has taken a frame within the last half second or so. */
+bool uvc_taking(void);

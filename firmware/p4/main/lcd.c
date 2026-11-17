@@ -302,6 +302,8 @@ static void clear(void *fb)
 
 /* Scales and turns a frame into the back buffer, then shows it from the next refresh on. */
 static SemaphoreHandle_t s_scaled;
+/* A field offered and not yet scaled into a frame buffer. */
+static volatile bool s_scaling;
 
 static void show(const uint8_t *yuv)
 {
@@ -318,6 +320,7 @@ static void show(const uint8_t *yuv)
         .mode = PPA_TRANS_MODE_BLOCKING,
     };
     esp_err_t err = ppa_do_scale_rotate_mirror(s_srm, &srm);
+    s_scaling = false;
     xSemaphoreGive(s_scaled);
     if (err != ESP_OK) return;
     s_ppa_us = esp_timer_get_time() - t0;
@@ -399,6 +402,11 @@ void lcd_hold(bool hold)
     s_paused = hold;
 }
 
+bool lcd_busy(void)
+{
+    return s_scaling;
+}
+
 bool lcd_wait_scaled(uint32_t ms)
 {
     return s_scaled && xSemaphoreTake(s_scaled, pdMS_TO_TICKS(ms)) == pdTRUE;
@@ -408,6 +416,7 @@ void lcd_offer(const uint8_t *yuv)
 {
     if (!s_task || s_paused) return;
     if (s_scaled) xSemaphoreTake(s_scaled, 0);
+    s_scaling = true;
     ++s_offered;
     s_pending = yuv;
     xTaskNotifyGive(s_task);
