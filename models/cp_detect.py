@@ -68,6 +68,32 @@ def block_ratio(c2, block=BLOCK, symbols=SYMBOLS):
     return np.array(out)
 
 
+def nano_fold(i, q, dc_i, dc_q, symbols=SYMBOLS, lag=LAG, window=WINDOW, period=PERIOD):
+    """Bit for bit as fpga/rtl/cp_detect.v: lanes (2v+1) less the demod's fixed offsets, halved; integer |c| as
+    max + min/2; a 32-bit phase counter stepping round(2^32 / period) from 0 at the first sample, bin =
+    phase x 1565 >> 32; decisions every int(period x symbols) samples from the first. Returns each decision's
+    peak bin sum and total, as the Nano's registers give them."""
+    x_i = (i - dc_i) >> 1
+    x_q = (q - dc_q) >> 1
+    n = len(x_i)
+    b_i = np.concatenate([np.zeros(lag, np.int64), x_i[:-lag]])
+    b_q = np.concatenate([np.zeros(lag, np.int64), x_q[:-lag]])
+    p_re = x_i * b_i + x_q * b_q
+    p_im = x_q * b_i - x_i * b_q
+    c_re = np.cumsum(p_re) - np.concatenate([np.zeros(window, np.int64), np.cumsum(p_re)[:-window]])
+    c_im = np.cumsum(p_im) - np.concatenate([np.zeros(window, np.int64), np.cumsum(p_im)[:-window]])
+    re, im = np.abs(c_re), np.abs(c_im)
+    mag = np.maximum(re, im) + (np.minimum(re, im) >> 1)
+    step = int(round((1 << 32) / period))
+    bins = ((np.arange(n, dtype=np.int64) * step) % (1 << 32) * 1565) >> 32
+    span = int(period * symbols)
+    out = []
+    for start in range(0, n - span + 1, span):
+        acc = np.bincount(bins[start : start + span], weights=mag[start : start + span], minlength=1565).astype(np.int64)
+        out.append((int(acc.max()), int(acc.sum()), int(acc.argmax())))
+    return out
+
+
 def fixed_fold(i, q, symbols=SYMBOLS, lag=LAG, window=WINDOW, period=PERIOD):
     """The Nano's version: 7-bit lanes less a 2048-sample mean, integer |c| as max + min/2, folded into 1565
     bins by a 16.16 phase counter that steps 1/period of a turn a sample, then the fold's peak over its mean."""
@@ -109,10 +135,13 @@ def main(args):
         b = block_ratio(re.astype(float) ** 2 + im.astype(float) ** 2)
         x = fixed(i, q)
         ff = {n: fixed_fold(i, q, n) for n in (16, 64)}
+        nf = nano_fold(i.astype(np.int64), q.astype(np.int64), int(round(i.mean())), int(round(q.mean())))
+        nr = np.array([m * 1565 / max(t, 1) for m, t, _ in nf])
         name = path.split("/")[-1]
         print(f"{name:32s} {len(i):8d} samples: rho median {np.median(rho):.3f}, 99.9% {np.percentile(rho, 99.9):.3f}; "
               f"fold peak/mean {f.min():.2f}-{f.max():.2f}; block |c|^2 {b.min():.2f}-{b.max():.2f}; "
-              f"fixed fold 16 sym {ff[16].min():.2f}-{ff[16].max():.2f}, 64 sym {ff[64].min():.2f}-{ff[64].max():.2f}")
+              f"fixed fold 16 sym {ff[16].min():.2f}-{ff[16].max():.2f}, 64 sym {ff[64].min():.2f}-{ff[64].max():.2f}; "
+              f"nano {nr.min():.2f}-{nr.max():.2f}")
 
 
 if __name__ == "__main__":

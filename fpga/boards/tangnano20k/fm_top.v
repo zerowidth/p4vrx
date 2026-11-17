@@ -10,6 +10,9 @@
 //        from a radius of 121, where the lanes clip; bit 3: track the I/Q offsets rather than use 0x10-0x11
 //   0x10-0x11 I and Q offsets, signed, as the lanes read 2v+1; reads give the ones in use
 //   0x12-0x13 mean CORDIC magnitude over the last 32768 samples, low byte first (holding the high byte)
+//   0x08 bit 4: raw 40 MS/s, the lanes as sampled on the 40 MHz clock with PCLK from it, for I/Q captures
+//   0x14-0x1f HDZero detector (fpga/rtl/cp_detect.v): fold peak, fold total (32 bits each), peak bin and
+//             decisions (16 bits each), low bytes first; reading 0x14 holds them all for the reads after
 // lockout_regs_top's description:
 // passthru_lockout_top with an I2C register file at 0x42 on the P4's touch bus, for the P4's self-check:
 //   0x00-0x01 "PV", 0x02 build
@@ -20,7 +23,7 @@
 //   0x09-0x0a lane pattern, D7..D0 then D13..D8
 // The bus is still driven only while the P4 holds IRQ high.
 module fm_top #(
-    parameter [7:0] BUILD = 8'h02
+    parameter [7:0] BUILD = 8'h03
 ) (
     input  wire        clk_27m,
     output wire        spk_en,
@@ -96,7 +99,7 @@ module fm_top #(
     always @(negedge clk40) pclk_b <= pclk_a;
     wire pclk_fm = pclk_a | pclk_b;
     reg signed [7:0] dc_i_set = 0, dc_q_set = 0, dc_i_auto = 0, dc_q_auto = 0;
-    reg [3:0] control40 = 0;
+    reg [4:0] control40 = 0;
     always @(posedge clk40) control40 <= control;
     wire signed [7:0] dc_i = control40[3] ? dc_i_auto : dc_i_set;
     wire signed [7:0] dc_q = control40[3] ? dc_q_auto : dc_q_set;
@@ -112,6 +115,13 @@ module fm_top #(
     fm_demod demod (
         .clk(clk40), .in_i(lanes40[6:0]), .in_q(lanes40[13:7]), .dc_i(dc_i), .dc_q(dc_q),
         .take(third == 1), .out(fm_out), .magnitude(magnitude)
+    );
+    wire [31:0] cp_peak, cp_total;
+    wire [10:0] cp_bin;
+    wire [15:0] cp_decisions;
+    cp_detect hdz (
+        .clk(clk40), .valid(1'b1), .in_i(lanes40[6:0]), .in_q(lanes40[13:7]), .dc_i(dc_i), .dc_q(dc_q),
+        .peak(cp_peak), .total(cp_total), .peak_bin(cp_bin), .decisions(cp_decisions)
     );
     // Offsets: the mean of each lane, as 2v+1, over 65536 samples. Magnitude: the mean over 32768.
     reg [15:0] tally = 0;
@@ -184,7 +194,9 @@ module fm_top #(
     wire [7:0] reg_addr, wr_data;
     wire wr, rd;
     reg [7:0] rd_data;
-    reg [3:0] control = 0;
+    reg [4:0] control = 0;
+    reg [87:0] cp_held = 0;
+    reg [7:0] cp_decisions_hi = 0;
     reg [13:0] pattern = 0;
     reg [7:0] held = 0;
 
@@ -204,7 +216,7 @@ module fm_top #(
             8'h05: rd_data = held;
             8'h06: rd_data = seen_per_ms[7:0];
             8'h07: rd_data = held;
-            8'h08: rd_data = {4'd0, control};
+            8'h08: rd_data = {3'd0, control};
             8'h09: rd_data = pattern[7:0];
             8'h0a: rd_data = {2'd0, pattern[13:8]};
             8'h0b: rd_data = {4'd0, phase40};
@@ -215,6 +227,18 @@ module fm_top #(
             8'h11: rd_data = dc_q;
             8'h12: rd_data = mean_mag[7:0];
             8'h13: rd_data = held;
+            8'h14: rd_data = cp_peak[7:0];
+            8'h15: rd_data = cp_held[15:8];
+            8'h16: rd_data = cp_held[23:16];
+            8'h17: rd_data = cp_held[31:24];
+            8'h18: rd_data = cp_held[39:32];
+            8'h19: rd_data = cp_held[47:40];
+            8'h1a: rd_data = cp_held[55:48];
+            8'h1b: rd_data = cp_held[63:56];
+            8'h1c: rd_data = cp_held[71:64];
+            8'h1d: rd_data = cp_held[79:72];
+            8'h1e: rd_data = cp_held[87:80];
+            8'h1f: rd_data = cp_decisions_hi;
             default: rd_data = 8'h00;
         endcase
     end
@@ -224,7 +248,11 @@ module fm_top #(
         if (rd && reg_addr == 8'h06) held <= seen_per_ms[15:8];
         if (rd && reg_addr == 8'h0c) held <= count40_per_ms[15:8];
         if (wr && reg_addr == 8'h0b) phase40 <= wr_data[3:0];
-        if (wr && reg_addr == 8'h08) control <= wr_data[3:0];
+        if (wr && reg_addr == 8'h08) control <= wr_data[4:0];
+        if (rd && reg_addr == 8'h14) begin
+            cp_held <= {cp_decisions[7:0], 5'd0, cp_bin, cp_total, cp_peak};
+            cp_decisions_hi <= cp_decisions[15:8];
+        end
         if (wr && reg_addr == 8'h10) dc_i_set <= wr_data;
         if (wr && reg_addr == 8'h11) dc_q_set <= wr_data;
         if (rd && reg_addr == 8'h12) held <= {7'd0, mean_mag[8]};
@@ -235,9 +263,11 @@ module fm_top #(
     // The P4 samples on PCLK's rising edge, the clean clock's falling one, half a period on.
     // Pattern mode wins over FM, which wins over the raw lanes.
     wire own_clock = control[1];
-    wire fm = control[2] && !control[0];
-    wire drive = own_clock || fm ? en27[1] : en[1];
-    assign p4_pclk = drive ? (own_clock ? ~half : fm ? pclk_fm : ~q) : 1'bz;
-    assign p4_d    = drive ? (control[0] ? pattern : fm ? {fm_phase[13:6], fm_radius} : lanes) : 14'bz;
+    wire raw40 = control[4] && !control[0];
+    wire fm = control[2] && !control[0] && !raw40;
+    wire drive = own_clock || fm || raw40 ? en27[1] : en[1];
+    // Raw 40 MS/s: the lanes change on clk40's rise, and the P4 samples on PCLK's, clk40's fall.
+    assign p4_pclk = drive ? (own_clock ? ~half : raw40 ? ~clk40 : fm ? pclk_fm : ~q) : 1'bz;
+    assign p4_d    = drive ? (control[0] ? pattern : raw40 ? lanes40 : fm ? {fm_phase[13:6], fm_radius} : lanes) : 14'bz;
 
 endmodule
