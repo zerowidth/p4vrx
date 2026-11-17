@@ -23,9 +23,10 @@
 #define RADIUS 12
 #define EDGE 2
 /* The signal history: a bar every HISTORY_MS, BAR_W wide with a pixel between. */
-#define HISTORY_MS 200
-#define HISTORY_BAR_W 5
-#define HISTORY 24
+#define HISTORY_MS 100
+#define HISTORY_BAR_W 2
+#define REDRAW_TICKS 2
+#define HISTORY 48
 
 static const char BANDS[] = "RABEFL";
 static const char *const BAND_NAMES[] = {"R", "A", "B", "E", "F", "L"};
@@ -54,7 +55,7 @@ static screen_t s_screen;
 static int8_t s_history[HISTORY];
 /* Each channel's levels over the last few seconds, a sample every HISTORY_MS while a menu scans it; kept between
  * menus, -128 where the channel wasn't read. */
-#define CH_HISTORY 30
+#define CH_HISTORY 60
 static int8_t s_ch_history[48][CH_HISTORY];
 static int s_ch_head;
 static bool s_ch_ready;
@@ -124,8 +125,13 @@ bool ui_update(const ui_state_t *now, uint32_t ms)
             scanned |= now->levels[i] != -128;
         }
         s_ch_head = (s_ch_head + 1) % CH_HISTORY;
-        if (scanned) s_dirty = true;
-        else if (s_screen == SCREEN_MAIN) s_history_dirty = true;
+        /* A sample every HISTORY_MS, a redraw every REDRAW_TICKS of them: the bars stay fine-grained and the
+         * graphs move half as often. */
+        static unsigned ticks;
+        if (++ticks % REDRAW_TICKS == 0) {
+            if (scanned) s_dirty = true;
+            else if (s_screen == SCREEN_MAIN) s_history_dirty = true;
+        }
     }
     s_draw_all = s_dirty;
     s_draw_history = s_history_dirty && s_screen == SCREEN_MAIN;

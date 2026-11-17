@@ -19,4 +19,4 @@ The strip costs nothing per frame: the picture's PPA pass writes only its own 63
 
 Touch is not wired up yet. The tap that steps the channel works only in the simulator.
 
-The main screen's signal sparkline steps every 200 ms, 24 bars of 5 px across 4.8 s, and the picker and band grid keep 30 samples a channel at the same rate, 6 s. At 100 ms each redraw cost a PPA pass on the LCD as well.
+The signal histories sample every 100 ms (the main sparkline 48 bars of 2 px across 4.8 s, the picker and grid 60 samples a channel) and redraw every 200 ms, two samples at a time. Each redraw costs a PPA pass on the LCD.
