@@ -2098,6 +2098,24 @@ static int place_score(uint32_t ms)
 /* Slips the C5's clock while decoding until the score is near the lowest seen. The capture-side placement
  * in iq_start picks a clean-looking place, but decodes from it still differ several times over in noise and
  * clicks, and the decoder's own measures tell them apart. */
+/* In fm mode the Nano samples the bus on its 40 MHz PLL, whose phase moves the sample 1.56 ns a step; at a
+ * weak signal 4 phases read 175-241 kHz of tip noise. Every other step is scored, and the best kept. */
+static void place_pll(void)
+{
+    enum { PHASES = 16, PHASE_STEP = 2 };
+    int best = INT32_MAX, best_phase = 0, seen[PHASES / PHASE_STEP];
+    for (int k = 0; k < PHASES / PHASE_STEP; ++k) {
+        nano_pll_phase(k * PHASE_STEP);
+        vTaskDelay(pdMS_TO_TICKS(100));
+        seen[k] = place_score(400);
+        if (seen[k] >= 0 && seen[k] < best) best = seen[k], best_phase = k * PHASE_STEP;
+    }
+    nano_pll_phase(best_phase);
+    say("tip noise in kHz plus 10 a click line a field, by PLL phase (every %d of %d):", PHASE_STEP, PHASES);
+    for (int k = 0; k < PHASES / PHASE_STEP; ++k) say(" %d", seen[k]);
+    say("; phase %d\n", best_phase);
+}
+
 static void place_by_noise(void)
 {
     /* About the best tip noise the link gives, with no clicks: no place is likely to beat it by much. */
@@ -2117,6 +2135,7 @@ static void place_by_noise(void)
     say("tip noise in kHz plus 10 a click line a field, by clock place:");
     for (int k = 0; k <= n && k < TRIES; ++k) say(" %d", seen[k]);
     say("\n");
+    if (s_fm) place_pll();
 }
 
 bool decode_start(const char *channel)

@@ -21,3 +21,5 @@ bool nano_control(uint8_t control);
 bool nano_magnitude(int *magnitude);
 /* Whether the Nano's bitstream has the FM demod (build 2 or later). */
 bool nano_has_fm(void);
+/* fm_top's 40 MHz PLL phase, 0-15. */
+bool nano_pll_phase(int phase);

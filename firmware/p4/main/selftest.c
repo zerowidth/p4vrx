@@ -359,6 +359,12 @@ void selftest_info(void)
     say("\n");
 }
 
+bool nano_pll_phase(int phase)
+{
+    const uint8_t p = (uint8_t)(phase & 15);
+    return nano_write(0x0b, &p, 1);
+}
+
 bool nano_has_fm(void)
 {
     uint8_t id[3];

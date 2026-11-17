@@ -2,13 +2,14 @@
 
 The Nano takes the C5's I/Q at 40 MS/s, demodulates it, and sends the P4 frequency samples at 13.33 MS/s on the same 14-lane bus. The P4 keeps its decoder from the composite onward and drops its phase lookup, difference and despeck. Pass-through stays selectable, so the current path keeps working and the no-FPGA build is unchanged.
 
-Status: fm is the P4's default whenever the Nano reports build 2 or later (`fm_top`); with `lockout_regs_top` (build 1), the image in the Nano's flash, it falls back to raw lanes. `decode source raw|fm` overrides it from the next start. `fm_top` runs from SRAM until it is written to flash. Against raw on R4 at a fixed gain of 57, three alternations of 10 s each: sync-tip noise 72-80 kHz against 110-135, and 0-2 clicked lines against 15-124. After PCLK went to 50% duty, 67-70 kHz against 135-138. The decoder's core 1 load is unchanged (54.6% against 55.1%).
+Status: fm is the P4's default whenever the Nano reports build 2 or later (`fm_top`); with `lockout_regs_top` (build 1), the image in the Nano's flash, it falls back to raw lanes. `decode source raw|fm` overrides it from the next start. `fm_top` was written to the Nano's flash on 2026-11-17, by Nathan. Against raw on R4 at a fixed gain of 57, three alternations of 10 s each: sync-tip noise 72-80 kHz against 110-135, and 0-2 clicked lines against 15-124. After PCLK went to 50% duty, 67-70 kHz against 135-138. The decoder's core 1 load is unchanged (54.6% against 55.1%).
 
 Soak, 10 minutes in fm mode: lock throughout (253-254 hsyncs a field, line 847.387-847.392 samples), no PLL lock lost, core 1 at 53.5-55.4%, 4 ring overruns in all. Tip noise was 74-81 kHz until the signal weakened 4 minutes in (gain 54-57 rose to 61-65), then 101-186 kHz with up to 4,212 clicked lines in 30 s. Raw and fm alternated straight after, at that weaker signal: raw 159-188 kHz, fm 120-144.
 
 - RTL (`fpga/rtl/fm_demod.v`) matches the model bit for bit in iverilog on three captures (`models/fm_demod_check.py`). `fm_top`: 14% of LUT4s, 7% of flops, 11 multipliers, the 40 MHz domain closing at 76 MHz.
 - PLL, 2026-11-17: the lockout's clean clock ×3 held lock at 40,000 edges/ms for 60 s decoding R4, and 30 s on dead R2 at gain 77 with about 450 crosstalk edges/ms refused. The 2026-11-16 PLL bitstream, fed the raw C5 clock, lost lock.
-- The PLL's dynamic phase made no difference: 16 steps all gave 167-183 kHz in the first, overrun-bound run. Either the eye is wide at 40 MS/s or the phase setting isn't taking; untested further.
+- The PLL's dynamic phase matters: captures at phases 0, 4, 8 and 12 on a weak signal read 230, 184, 241 and 175 kHz of tip noise (147-364 outliers in 262,143 steps). A first sweep showed nothing because that build was losing samples to ring overruns. In fm mode, after the C5's clock is placed, `place_pll` scores every other phase (400 ms each) and keeps the best: one start scored 192-288 and kept phase 0.
+- Lane errors: in those captures, single-bit pairs were at most 10 in 262,143 steps, all on D11 (the frequency-word capture before had pointed at D9). No lane stands out once PCLK was fixed.
 
 ## Why
 
@@ -96,7 +97,9 @@ On four 40 MS/s captures of R4 (2026-11-15 and -16). Error is rms against the fl
 
 - Gain, done: in fm mode the gain loop takes the radius from the Nano's mean magnitude (0x12-0x13, ×4.86) and clipping from a radius over 110. On R4 it went from 40 to 57 and from 75 to 56 within 3 s; raw chose 56.
 - Channel scan, done: D5..D0 carry each sample's radius code (radius / 4.86 to 31) and a clip flag from 121, mapped into the low byte as the BitScrambler's info byte, so `sweep_take` reads them with a table of radius². Band R: live R4 57.4 dB (s.d. 0.3), empty channels 29-34 dB; raw gave 54.3 (s.d. 6.3) and 23-32. fm's table now takes 3.5 dB off so both read alike, which keeps empty channels under the picker's 28 dB amber: afterwards empties read 24-30 dB.
-- A capture of the FM words showed 158 outliers in 262,144 samples; of those one flipped bit explains, 61 of 64 are bit 9, so D9 may be marginal at this timing.
+
 
 - The output scale against the decoder's units: 2.44 kHz is about 1/21 of today's 52 kHz step.
 - Whether 80 MS/s (802.11p off, a wider filter) is worth it later; it needs an 80 MHz PLL output and the same PLL phase search.
+
+At a much weaker signal later the same day (gain 61-64), raw read 392 kHz of tip noise and 12,523 clicked lines in 10 s; fm read 228 kHz and 2,187.
