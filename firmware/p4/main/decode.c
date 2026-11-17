@@ -216,6 +216,8 @@ static bool s_despeck = true;
 /* The Nano demodulates (fm_top's control bit 2) and the ring holds its 14-bit frequencies, 2.44 kHz an LSB,
  * rather than the BitScrambler's phase bytes; the gain stays where it is set. */
 static bool s_fm;
+/* What `decode source` asks for; fm is used only when the Nano's bitstream has the demod. */
+static bool s_want_fm = true;
 /* The Nano's magnitude is the radius x 4 x 1.6468 / 32. */
 #define FM_RADIUS_PER_MAGNITUDE 4.858f
 static bool s_low;
@@ -1892,6 +1894,7 @@ static esp_err_t start_rx(void)
         .eof_data_len = EOF_BYTES,
     };
     const parlio_rx_event_callbacks_t cbs = {.on_partial_receive = on_partial};
+    s_fm = s_want_fm && nano_has_fm();
     iq_phase_lanes(s_fm);
     esp_err_t err = iq_new_rx(RING_BYTES, &s_rx);
     iq_phase_lanes(false);
@@ -1971,8 +1974,8 @@ static unsigned s_mhz;
 
 static void status(void)
 {
-    say("%s on %s (%u MHz), %lu fields, last field %lu/%d hsyncs%s, line %lu.%03lu samples\n",
-        s_running ? "running" : "stopped", s_channel, s_mhz, (unsigned long)s_fields, (unsigned long)s_last_hits, FIELD_LINES,
+    say("%s on %s (%u MHz) from %s, %lu fields, last field %lu/%d hsyncs%s, line %lu.%03lu samples\n",
+        s_running ? "running" : "stopped", s_channel, s_mhz, s_fm ? "the Nano's FM demod" : "raw lanes", (unsigned long)s_fields, (unsigned long)s_last_hits, FIELD_LINES,
         s_last_vsync_ok ? ", vsync" : ", no vsync", (unsigned long)(s_period >> 16),
         (unsigned long)((s_period & 0xffff) * 1000 >> 16));
     say("%lu vertical corrections, %lu broad pulses ignored outside the vsync window, %lu off the line's start or middle\n",
@@ -2305,8 +2308,8 @@ void decode_command(int argc, char **argv)
         if (argc > 3) s_tnr_mix = atoi(argv[3]);
     } else if (strcmp(sub, "source") == 0 && argc > 2) {
         /* Takes effect at the next start. */
-        s_fm = strcmp(argv[2], "fm") == 0;
-        say("ok, %s at the next decode on\n", s_fm ? "the Nano's FM demod" : "raw lanes");
+        s_want_fm = strcmp(argv[2], "fm") == 0;
+        say("ok, %s at the next decode on\n", s_want_fm ? "the Nano's FM demod" : "raw lanes");
         return;
     } else if (strcmp(sub, "wraps") == 0 && argc > 2) {
         s_despeck = strcmp(argv[2], "off") != 0;

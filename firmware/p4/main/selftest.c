@@ -291,6 +291,11 @@ bool selftest_run(void)
     for (int k = 0; k < N_CHECKS; ++k) s_checks[k].state = CHECK_SKIPPED, s_checks[k].detail[0] = '\0';
     bool c5 = check_c5() && check_wires();
     bool ok = check_nano() && c5;
+    /* The Nano keeps its mode across a P4 reset; the walks need the lanes passed through. */
+    if (s_checks[NANO].state == CHECK_OK) {
+        const uint8_t raw = 0;
+        nano_write(REG_CONTROL, &raw, 1);
+    }
     if (c5) {
         /* The walk's clock first: the Nano's enable only changes on the C5's clock edges. */
         if (!walk(0)) ok = fail(BUS_OFF, "C5 did not start its clock");
@@ -352,6 +357,13 @@ void selftest_info(void)
     for (int k = 0; k < N_CHECKS; ++k)
         if (s_checks[k].state == CHECK_FAILED) say(" %s: %s;", s_checks[k].name, s_checks[k].detail);
     say("\n");
+}
+
+bool nano_has_fm(void)
+{
+    uint8_t id[3];
+    if (!s_nano) check_nano();
+    return nano_read(REG_ID, id, 3) && id[0] == 'P' && id[1] == 'V' && id[2] >= 2;
 }
 
 bool nano_magnitude(int *magnitude)

@@ -19,3 +19,5 @@ void nano_command(int argc, char **argv);
 bool nano_control(uint8_t control);
 /* fm_top's mean CORDIC magnitude over the last 32768 samples. */
 bool nano_magnitude(int *magnitude);
+/* Whether the Nano's bitstream has the FM demod (build 2 or later). */
+bool nano_has_fm(void);
