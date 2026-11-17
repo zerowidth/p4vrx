@@ -74,7 +74,8 @@ static volatile bool s_encode = true;
 
 #define NOTIFY_TICK 1
 #define NOTIFY_FIELD 2
-/* Without a decoded field for this long, the test pattern takes over. */
+/* With the decoder stopped and no field for this long, the test pattern takes over. While it runs, a dead channel
+ * or a paused decoder gives fields slowly or not at all, and the last one stays up rather than flicking to this. */
 #define PATTERN_AFTER_US (100 * 1000)
 /* Its 4:2:0 conversion runs on the CPU through PSRAM, about 12 ms a frame, so it runs at 10 fps. */
 #define PATTERN_EVERY 6
@@ -198,7 +199,7 @@ static void video_task(void *arg)
         if (field) {
             raw = s_field[s_ready];
             s_last_field_us = t0;
-        } else if (t0 - s_last_field_us > PATTERN_AFTER_US && ++s_pattern_ticks % PATTERN_EVERY == 0) {
+        } else if (!decode_running() && t0 - s_last_field_us > PATTERN_AFTER_US && ++s_pattern_ticks % PATTERN_EVERY == 0) {
             render(seq);
             raw = s_raw;
         } else {
