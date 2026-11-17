@@ -20,3 +20,5 @@ The strip costs nothing per frame: the picture's PPA pass writes only its own 63
 Touch is not wired up yet. The tap that steps the channel works only in the simulator.
 
 The signal histories sample every 200 ms and draw each sample as it comes, one narrow bar or column: the main sparkline 48 bars of 2 px across 9.6 s, the picker and grid 60 samples a channel across 12 s. Each redraw costs a PPA pass on the LCD.
+
+While the picture is held for a channel scan, a pause sign sits in its centre: Font Awesome's solid `pause` at 80 px, light grey over a dark halo (the glyph grown 6 px and blurred), baked by `rake ui:fonts` into `ui/fonts/pause.c` as two 8-bit alpha maps. The P4 blends it into the three frame buffers once per hold, mapped through the panel's turn; the simulator draws the same maps.

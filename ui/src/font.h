@@ -26,3 +26,11 @@ typedef struct {
     const uint8_t *bits;
     uint8_t w, h;
 } icon_set_t;
+
+/* A picture drawn over video: 8-bit alpha for a light fill and a dark halo around it, w by h. */
+typedef struct {
+    uint16_t w, h;
+    const uint8_t *fill, *halo;
+} overlay_t;
+
+extern const overlay_t pause_overlay;

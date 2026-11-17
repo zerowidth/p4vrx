@@ -20,6 +20,7 @@
 #include "freertos/task.h"
 
 #include "console.h"
+#include "font.h"
 #include "ui.h"
 #include "video.h"
 
@@ -337,6 +338,38 @@ static void show(const uint8_t *yuv)
     ++s_shown;
 }
 
+/* The pause sign over a held picture, once into each buffer: the next frame after the hold paints over it. */
+static bool s_pause_drawn;
+
+static uint16_t blend(uint16_t px, int halo, int fill)
+{
+    int r = px >> 11, g = px >> 5 & 63, b = px & 31;
+    /* The halo darkens to 85% at most; the fill is a light grey, 240 of 255. */
+    int keep = 255 - halo * 217 / 255;
+    r = r * keep / 255, g = g * keep / 255, b = b * keep / 255;
+    r = (r * (255 - fill) + 29 * fill) / 255;
+    g = (g * (255 - fill) + 59 * fill) / 255;
+    b = (b * (255 - fill) + 29 * fill) / 255;
+    return (uint16_t)(r << 11 | g << 5 | b);
+}
+
+static void draw_pause(uint16_t *fb)
+{
+    const overlay_t *o = &pause_overlay;
+    /* Centred on the picture, in landscape; each landscape point mapped into the panel's rows as the PPA turns it. */
+    int x0 = ui_picture_x() + PIC_W / 2 - o->w / 2, y0 = LCD_W / 2 - o->h / 2;
+    for (int y = 0; y < o->h; ++y)
+        for (int x = 0; x < o->w; ++x) {
+            int i = y * o->w + x, halo = o->halo[i], fill = o->fill[i];
+            if (!halo && !fill) continue;
+            int lx = x0 + x, ly = y0 + y;
+            int row = turned_270() ? lx : LCD_H - 1 - lx, col = turned_270() ? LCD_W - 1 - ly : ly;
+            uint16_t *p = &fb[row * LCD_W + col];
+            *p = blend(*p, halo, fill);
+        }
+    esp_cache_msync(fb, FRAME_BYTES, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+}
+
 static void lcd_task(void *arg)
 {
     int64_t window = esp_timer_get_time();
@@ -355,6 +388,10 @@ static void lcd_task(void *arg)
             if (!s_full_on && s_strip_stale && xSemaphoreTake(s_strip_lock, 0) == pdTRUE) {
                 for (int k = 0; k < 3; ++k) copy_strip(k);
                 xSemaphoreGive(s_strip_lock);
+            }
+            if (!s_full_on && !s_pause_drawn) {
+                for (int k = 0; k < 3; ++k) draw_pause(s_fb[k]);
+                s_pause_drawn = true;
             }
             continue;
         }
@@ -400,6 +437,8 @@ void lcd_blank(void)
 void lcd_hold(bool hold)
 {
     s_paused = hold;
+    s_pause_drawn = false;
+    if (hold && s_task) xTaskNotifyGive(s_task);
 }
 
 bool lcd_busy(void)

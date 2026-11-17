@@ -5,7 +5,7 @@ INTER = ENV["INTER_TTF"] ||
 FONTAWESOME = ENV["FONTAWESOME_DIR"] ||
               Dir["/opt/homebrew/Caskroom/font-fontawesome/*/fontawesome-free-*-desktop"].max_by { |p| Gem::Version.new(p[%r{font-fontawesome/([^/]+)/}, 1]) rescue Gem::Version.new("0") }
 UI_ICONS = %w[brands/usb desktop slash hand-pointer circle sd-card bars table-cells grip].join(",")
-UI_SOURCES = %w[ui/src/ui.c ui/src/canvas.c ui/fonts/inter.c ui/fonts/icons.c ui/sim/sim.c ui/sim/libc.c].freeze
+UI_SOURCES = %w[ui/src/ui.c ui/src/canvas.c ui/fonts/inter.c ui/fonts/icons.c ui/fonts/pause.c ui/sim/sim.c ui/sim/libc.c].freeze
 UI_WASM = "ui/build/ui.wasm"
 UI_PORT = ENV.fetch("PORT", "8790")
 
@@ -36,6 +36,9 @@ namespace :ui do
     sh "uv", "run", "-q", "--with", "freetype-py", "ui/fonts/bake.py", INTER, "ui/fonts/inter.c",
        "font_small:20", "font_medium:36", "font_large:80: 0123456789ABEFLRXabefhlrx-"
     abort "no Font Awesome: brew install --cask font-fontawesome, or set FONTAWESOME_DIR" unless FONTAWESOME && File.directory?(FONTAWESOME)
+    # The pause sign over a held picture: 80 px, with a 6 px halo.
+    sh "uv", "run", "-q", "--with", "freetype-py", "--with", "numpy", "ui/fonts/bake.py", "badge", FONTAWESOME,
+       "ui/fonts/pause.c", "pause_overlay", "pause", "80", "6"
     sh "uv", "run", "-q", "--with", "freetype-py", "ui/fonts/bake.py", "icons", FONTAWESOME, "ui/fonts/icons.c", UI_ICONS,
        "icons_24:24", "icons_36:36"
   end

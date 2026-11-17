@@ -26,6 +26,20 @@ async function start() {
   const { instance } = await WebAssembly.instantiateStreaming(fetch("ui.wasm"));
   const ui = instance.exports;
   const fb = () => new Uint16Array(ui.memory.buffer, ui.sim_fb(), W * H);
+  // The pause sign as the P4 blends it: the halo darkens to 85%, then a light grey fill.
+  const pause = (() => {
+    const w = ui.sim_pause_w(), h = ui.sim_pause_h();
+    const fill = new Uint8Array(ui.memory.buffer, ui.sim_pause_fill(), w * h);
+    const halo = new Uint8Array(ui.memory.buffer, ui.sim_pause_halo(), w * h);
+    const img = new ImageData(w, h), c = document.createElement("canvas");
+    for (let i = 0; i < w * h; ++i) {
+      const f = fill[i] / 255, a = halo[i] / 255 * 0.85, total = f + a * (1 - f);
+      img.data.set([240, 240, 240, Math.round(total * 255)].map((v, k) => (k < 3 ? (total ? v * f / total : 0) : v)), i * 4);
+    }
+    c.width = w, c.height = h;
+    c.getContext("2d").putImageData(img, 0, 0);
+    return c;
+  })();
 
   function push() {
     const usb = Number(document.querySelector("input[name=usb]:checked").value);
@@ -135,6 +149,7 @@ async function start() {
       ctx.fillStyle = "#1c1d21";
       ctx.fillRect(px0, 0, PIC_W, H);
     }
+    if (ui.sim_scan()) ctx.drawImage(pause, px0 + (PIC_W - pause.width) / 2, (H - pause.height) / 2);
     if (redrawn) copy(strip, sx, STRIP_W);
     ctx.putImageData(strip, sx, 0);
     requestAnimationFrame(draw);

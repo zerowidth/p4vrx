@@ -1,4 +1,5 @@
 /* The browser's side of ui/: the page sets the state and touches, and reads the strip from the frame. */
+#include "font.h"
 #include "ui.h"
 
 #define EXPORT(name) __attribute__((export_name(#name)))
@@ -73,6 +74,27 @@ EXPORT(sim_set_strip_left) void sim_set_strip_left(int left)
 EXPORT(sim_strip_x) int sim_strip_x(void)
 {
     return ui_strip_x();
+}
+
+/* The pause sign drawn over a held picture: its size, and its fill and halo alpha. */
+EXPORT(sim_pause_w) int sim_pause_w(void)
+{
+    return pause_overlay.w;
+}
+
+EXPORT(sim_pause_h) int sim_pause_h(void)
+{
+    return pause_overlay.h;
+}
+
+EXPORT(sim_pause_fill) const uint8_t *sim_pause_fill(void)
+{
+    return pause_overlay.fill;
+}
+
+EXPORT(sim_pause_halo) const uint8_t *sim_pause_halo(void)
+{
+    return pause_overlay.halo;
 }
 
 EXPORT(sim_picture_x) int sim_picture_x(void)
