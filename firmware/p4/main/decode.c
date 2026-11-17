@@ -1567,7 +1567,9 @@ static int marked_lanes(const uint8_t *b, uint32_t words)
 /* Demodulates a node's two bytes a sample; bytes is what the DMA wrote of the node. The marked
  * byte is on the even addresses from the first EOF after a start, and on the odd ones before it and from
  * each halt to the next EOF. */
-/* Power for each of the Nano's radius codes, in the units of s_bs_power: the square of the code's centre. */
+/* Power for each of the Nano's radius codes, in the units of s_bs_power: the square of the code's centre, less
+ * 3.5 dB, by which band R read above raw (empty channels 29-34 against 23-32 dB, R4 57.4 against 54.3). */
+#define FM_POWER_TRIM 0.447f
 static uint32_t s_fm_power[32];
 
 /* The Nano's phase, high byte of each word, differenced as the BitScrambler's is. */
@@ -1576,7 +1578,7 @@ static void process_fm(const uint8_t *b, uint32_t bytes)
     uint32_t words = (bytes / 2) & ~15u;
     uint32_t n = s_n;
     if (!s_fm_power[1])
-        for (int c = 0; c < 32; ++c) s_fm_power[c] = (uint32_t)lrintf(powf((c + 0.5f) * FM_RADIUS_PER_MAGNITUDE, 2));
+        for (int c = 0; c < 32; ++c) s_fm_power[c] = (uint32_t)lrintf(powf((c + 0.5f) * FM_RADIUS_PER_MAGNITUDE, 2) * FM_POWER_TRIM);
     sweep_take(b, words, n, true, s_fm_power);
     for (uint32_t done = 0; done < words;) {
         uint32_t at = n % HIST, run = words - done < HIST - at ? words - done : HIST - at;

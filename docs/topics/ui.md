@@ -18,3 +18,5 @@ The build uses Xcode's clang (`/usr/bin/clang --target=wasm32`) and, as the link
 The strip costs nothing per frame: the picture's PPA pass writes only its own 630 columns, so each buffer keeps the strip until it changes. A change costs one 3.0-3.5 ms PPA pass per buffer. Drawing the strip with the CPU instead took 12.5 ms a copy from PSRAM and dropped the panel to 41 fps. `tools/lcdgrab.py OUT.png` saves what the panel shows ([experiment](../experiments/2026-11-16-lcd-ui-strip.md)).
 
 Touch is not wired up yet. The tap that steps the channel works only in the simulator.
+
+The main screen's signal sparkline steps every 200 ms, 24 bars of 5 px across 4.8 s, and the picker and band grid keep 30 samples a channel at the same rate, 6 s. At 100 ms each redraw cost a PPA pass on the LCD as well.

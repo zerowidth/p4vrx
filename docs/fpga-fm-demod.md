@@ -95,7 +95,7 @@ On four 40 MS/s captures of R4 (2026-11-15 and -16). Error is rms against the fl
 ## Open
 
 - Gain, done: in fm mode the gain loop takes the radius from the Nano's mean magnitude (0x12-0x13, ×4.86) and clipping from a radius over 110. On R4 it went from 40 to 57 and from 75 to 56 within 3 s; raw chose 56.
-- Channel scan, done: D5..D0 carry each sample's radius code (radius / 4.86 to 31) and a clip flag from 121, mapped into the low byte as the BitScrambler's info byte, so `sweep_take` reads them with a table of radius². Band R: live R4 57.4 dB (s.d. 0.3), empty channels 29-34 dB; raw gave 54.3 (s.d. 6.3) and 23-32.
+- Channel scan, done: D5..D0 carry each sample's radius code (radius / 4.86 to 31) and a clip flag from 121, mapped into the low byte as the BitScrambler's info byte, so `sweep_take` reads them with a table of radius². Band R: live R4 57.4 dB (s.d. 0.3), empty channels 29-34 dB; raw gave 54.3 (s.d. 6.3) and 23-32. fm's table now takes 3.5 dB off so both read alike, which keeps empty channels under the picker's 28 dB amber: afterwards empties read 24-30 dB.
 - A capture of the FM words showed 158 outliers in 262,144 samples; of those one flipped bit explains, 61 of 64 are bit 9, so D9 may be marginal at this timing.
 
 - The output scale against the decoder's units: 2.44 kHz is about 1/21 of today's 52 kHz step.
