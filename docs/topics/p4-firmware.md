@@ -47,7 +47,7 @@ At power-up the P4 starts decoding on the last channel started with `decode on`,
 
 The LCD (`lcd.c`, adapted from Waveshare's BSP, Apache-2.0) shows each decoded field: the PPA scales it to 630x480 on the panel's left, turns it a quarter turn and converts it to RGB565 in one of three DPI frame buffers, about 12 ms a frame, at 59.8 fps alongside UVC. The 170 px on the right hold the UI ([ui](ui.md)). `lcd` reports rates, `lcd rotate` flips the picture and `lcd grab` sends the frame buffer (`tools/lcdgrab.py`).
 
-With decode, LCD and UVC all running, core 0 is 34% idle and core 1 30% idle, and the decoder keeps 59 fields/s. The LCD and the H.264 encoder each make 60 fps alone but 52-54 fps together, from memory contention rather than CPU. `cpu [ms]` gives each task's share of its core ([experiment](../experiments/2026-11-17-cpu-budget.md)).
+The encoder runs only while a UVC host streams (`video encode auto`), so the LCD has 59.9 fps to itself otherwise. Streaming, the LCD and UVC share PSRAM bandwidth and both run at 58 fps; `video lcd 2` gives UVC 59.6 fps and the LCD 30. The UI strip copies only the rows it redrew. With everything running, both cores keep at least 34% idle. `cpu [ms]` gives each task's share of its core ([budget](../experiments/2026-11-17-cpu-budget.md), [strip rows](../experiments/2026-11-17-strip-rows-encode-auto.md)).
 
 ## Dev practice: fail fast
 

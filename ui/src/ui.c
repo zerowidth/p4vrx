@@ -61,6 +61,9 @@ static bool s_ch_ready;
 static int s_history_head;
 static uint32_t s_history_ms;
 static bool s_have_state, s_dirty = true;
+/* Only the main screen's signal history moved since the last draw; and what the next draw redraws, and the rows it did. */
+static bool s_history_dirty, s_draw_all, s_draw_history;
+static int s_drawn_y0, s_drawn_y1;
 /* The button held down, and whether the touch is still on it. */
 static int s_down_id = BUTTON_NONE;
 static bool s_down, s_on_button;
@@ -121,11 +124,13 @@ bool ui_update(const ui_state_t *now, uint32_t ms)
             scanned |= now->levels[i] != -128;
         }
         s_ch_head = (s_ch_head + 1) % CH_HISTORY;
-        if (s_screen == SCREEN_MAIN || scanned) s_dirty = true;
+        if (scanned) s_dirty = true;
+        else if (s_screen == SCREEN_MAIN) s_history_dirty = true;
     }
-    bool dirty = s_dirty;
-    s_dirty = false;
-    return dirty;
+    s_draw_all = s_dirty;
+    s_draw_history = s_history_dirty && s_screen == SCREEN_MAIN;
+    s_dirty = s_history_dirty = false;
+    return s_draw_all || s_draw_history;
 }
 
 ui_layout_t ui_layout(void)
@@ -304,8 +309,23 @@ static void draw_history(canvas_t *c, int x, int y, int w, int h)
     }
 }
 
+#define HISTORY_Y 336
+#define HISTORY_H 88
+
+void ui_drawn_rows(int *y0, int *y1)
+{
+    *y0 = s_drawn_y0, *y1 = s_drawn_y1;
+}
+
 void ui_draw(canvas_t *c)
 {
+    if (!s_draw_all && s_draw_history) {
+        canvas_fill(c, 0, HISTORY_Y, c->w, HISTORY_H, BG);
+        draw_history(c, 12, HISTORY_Y, c->w - 24, HISTORY_H);
+        s_drawn_y0 = HISTORY_Y, s_drawn_y1 = HISTORY_Y + HISTORY_H;
+        return;
+    }
+    s_drawn_y0 = 0, s_drawn_y1 = c->h;
     button_t list[BAND_COUNT * 8 + 2];
     int n = buttons(list), ox = s_screen == SCREEN_BANDS ? 0 : s_strip_x;
     canvas_fill(c, 0, 0, c->w, c->h, BG);
@@ -314,7 +334,7 @@ void ui_draw(canvas_t *c)
     if (s_screen == SCREEN_MAIN) {
         text_in(c, ox, &list[0], &font_large, s_state.decoding ? s_state.channel : "--", FG);
         draw_status(c, 172);
-        draw_history(c, 12, 336, c->w - 24, 88);
+        draw_history(c, 12, HISTORY_Y, c->w - 24, HISTORY_H);
         draw_icons(c, UI_H - 12 - icons_24.h);
     } else if (s_screen == SCREEN_CHANNELS) {
         /* The band name, with a grid icon at the right saying it opens the full band grid. */

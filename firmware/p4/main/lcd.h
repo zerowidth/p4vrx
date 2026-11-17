@@ -17,7 +17,7 @@ void lcd_hold(bool hold);
 void lcd_blank(void);
 /* The UI strip right of the picture: draw between these, and the panel shows it from the next frames. */
 canvas_t *lcd_strip_begin(void);
-void lcd_strip_end(void);
+void lcd_strip_end(int lo, int hi);
 /* The whole panel for UI screens that cover the picture, shown while the picture is held; lcd_full_off goes back
  * to the picture and strip. */
 canvas_t *lcd_full_begin(void);

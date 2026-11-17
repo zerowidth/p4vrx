@@ -70,7 +70,9 @@ static uint32_t s_keyframes;
 static uint32_t s_convert_us;
 static volatile bool s_want_key;
 /* `video encode off` stops the encoder, to see what it costs the decoder. */
-static volatile bool s_encode = true;
+/* Encoding off, on, or only while a UVC host streams, which leaves the LCD the bandwidth otherwise. */
+typedef enum { ENCODE_OFF, ENCODE_ON, ENCODE_AUTO } encode_mode_t;
+static volatile encode_mode_t s_encode = ENCODE_AUTO;
 /* 0 runs the LCD's PPA pass and the encoder at once; 1 encodes once the PPA is done; 2 offers the LCD the field once encoded. */
 static volatile int s_stagger;
 /* The LCD gets every Nth field. */
@@ -213,11 +215,16 @@ static void video_task(void *arg)
             gray_to_yuv420(raw);
             raw = s_yuv420;
         }
+        static bool idle;
+        bool encoding = s_encode == ENCODE_ON || (s_encode == ENCODE_AUTO && uvc_streaming());
+        /* The encoder's reference is stale after a pause, so it restarts on a keyframe. */
+        if (encoding && idle) s_want_key = true;
+        idle = !encoding;
         bool to_lcd = s_lcd_every <= 1 || seq % s_lcd_every == 0;
-        if ((s_stagger != 2 || !s_encode) && to_lcd) lcd_offer(raw);
-        if (s_stagger == 1 && s_encode && to_lcd) lcd_wait_scaled(20);
+        if ((s_stagger != 2 || !encoding) && to_lcd) lcd_offer(raw);
+        if (s_stagger == 1 && encoding && to_lcd) lcd_wait_scaled(20);
         int64_t t1 = esp_timer_get_time();
-        if (!s_encode) continue;
+        if (!encoding) continue;
         encode(raw, true, seq, t0);
         if (s_stagger == 2 && to_lcd) lcd_offer(raw);
         int64_t t2 = esp_timer_get_time();
@@ -409,7 +416,7 @@ void video_command(int argc, char **argv)
         return;
     }
     if (argc > 2 && strcmp(argv[1], "encode") == 0) {
-        s_encode = strcmp(argv[2], "off") != 0;
+        s_encode = strcmp(argv[2], "off") == 0 ? ENCODE_OFF : strcmp(argv[2], "on") == 0 ? ENCODE_ON : ENCODE_AUTO;
         return;
     }
     if (argc > 1 && strcmp(argv[1], "raw") == 0) {

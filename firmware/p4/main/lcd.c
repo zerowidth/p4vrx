@@ -105,6 +105,17 @@ static uint32_t s_shown, s_offered, s_late, s_ppa_us, s_fps_tenths;
 static canvas_t s_strip;
 static SemaphoreHandle_t s_strip_lock;
 static volatile uint8_t s_strip_stale;
+/* Per frame buffer, the rows of it [lo, hi) not yet copied there. */
+static uint16_t s_stale_lo[3], s_stale_hi[3];
+
+static void strip_dirty(int lo, int hi)
+{
+    for (int k = 0; k < 3; ++k) {
+        if (!(s_strip_stale & 1 << k) || lo < s_stale_lo[k]) s_stale_lo[k] = lo;
+        if (!(s_strip_stale & 1 << k) || hi > s_stale_hi[k]) s_stale_hi[k] = hi;
+    }
+    s_strip_stale = 0x7;
+}
 static uint32_t s_strip_copies, s_strip_us;
 
 static bool turned_270(void)
@@ -119,14 +130,20 @@ static uint32_t row_of(int x, int w)
 }
 
 /* The PPA turns the strip as it turns the picture, into the rows after the picture's or before them. */
-static void copy_strip(void *fb)
+static void copy_strip(int k)
 {
+    if (!(s_strip_stale & 1 << k)) return;
+    int lo = s_stale_lo[k], hi = s_stale_hi[k];
+    s_strip_stale &= ~(1 << k);
+    if (hi <= lo) return;
     int64_t t0 = esp_timer_get_time();
+    /* Strip row y lands in panel column y turned one way, LCD_W - 1 - y the other. */
     const ppa_srm_oper_config_t srm = {
-        .in = {.buffer = s_strip.px, .pic_w = STRIP_W, .pic_h = LCD_W, .block_w = STRIP_W, .block_h = LCD_W,
-               .srm_cm = PPA_SRM_COLOR_MODE_RGB565},
-        .out = {.buffer = fb, .buffer_size = FRAME_BYTES, .pic_w = LCD_W, .pic_h = LCD_H,
-                .block_offset_x = 0, .block_offset_y = row_of(ui_strip_x(), STRIP_W), .srm_cm = PPA_SRM_COLOR_MODE_RGB565},
+        .in = {.buffer = s_strip.px, .pic_w = STRIP_W, .pic_h = LCD_W, .block_w = STRIP_W, .block_h = hi - lo,
+               .block_offset_y = lo, .srm_cm = PPA_SRM_COLOR_MODE_RGB565},
+        .out = {.buffer = s_fb[k], .buffer_size = FRAME_BYTES, .pic_w = LCD_W, .pic_h = LCD_H,
+                .block_offset_x = turned_270() ? LCD_W - hi : lo, .block_offset_y = row_of(ui_strip_x(), STRIP_W),
+                .srm_cm = PPA_SRM_COLOR_MODE_RGB565},
         .rotation_angle = s_rotation,
         .scale_x = 1.0f,
         .scale_y = 1.0f,
@@ -180,7 +197,7 @@ void lcd_full_off(void)
     if (!s_full_on) return;
     s_full_on = false;
     /* The picture comes back with the next frame; the strip has to be put back beside it. */
-    s_strip_stale = 7;
+    strip_dirty(0, LCD_W);
 }
 
 /* Landscape coordinates for a point given as the panel's own (480 across, 800 down), turned as the picture is. */
@@ -202,11 +219,11 @@ canvas_t *lcd_strip_begin(void)
     return &s_strip;
 }
 
-void lcd_strip_end(void)
+void lcd_strip_end(int lo, int hi)
 {
     bool paused = s_paused;
     esp_cache_msync(s_strip.px, STRIP_BYTES, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
-    s_strip_stale = 7;
+    if (hi > lo) strip_dirty(lo, hi);
     xSemaphoreGive(s_strip_lock);
     if (paused && s_task) xTaskNotifyGive(s_task);
 }
@@ -305,8 +322,7 @@ static void show(const uint8_t *yuv)
     if (err != ESP_OK) return;
     s_ppa_us = esp_timer_get_time() - t0;
     if (s_strip_stale & 1 << s_back && xSemaphoreTake(s_strip_lock, 0) == pdTRUE) {
-        copy_strip(fb);
-        s_strip_stale &= ~(1 << s_back);
+        copy_strip(s_back);
         xSemaphoreGive(s_strip_lock);
     }
     /* Two frames queued within one refresh would leave the next target on screen. */
@@ -334,8 +350,7 @@ static void lcd_task(void *arg)
                 continue;
             }
             if (!s_full_on && s_strip_stale && xSemaphoreTake(s_strip_lock, 0) == pdTRUE) {
-                for (int k = 0; k < 3; ++k) copy_strip(s_fb[k]);
-                s_strip_stale = 0;
+                for (int k = 0; k < 3; ++k) copy_strip(k);
                 xSemaphoreGive(s_strip_lock);
             }
             continue;
@@ -375,7 +390,7 @@ void lcd_blank(void)
 {
     if (!s_paused) return;
     for (int k = 0; k < 3; ++k) clear(s_fb[k]);
-    s_strip_stale = 7;
+    strip_dirty(0, LCD_W);
     if (s_task) xTaskNotifyGive(s_task);
 }
 
@@ -432,7 +447,7 @@ void lcd_command(int argc, char **argv)
         clear(s_fb[0]);
         clear(s_fb[1]);
         clear(s_fb[2]);
-        s_strip_stale = 7;
+        strip_dirty(0, LCD_W);
         say("ok, turned %d degrees\n", s_rotation == PPA_SRM_ROTATION_ANGLE_270 ? 270 : 90);
         return;
     }

@@ -178,8 +178,10 @@ static void screen_task(void *arg)
             canvas_t *c = full ? lcd_full_begin() : lcd_strip_begin();
             if (c) {
                 ui_draw(c);
+                int y0, y1;
+                ui_drawn_rows(&y0, &y1);
                 if (full) lcd_full_end();
-                else lcd_strip_end();
+                else lcd_strip_end(y0, y1);
             }
             if (!full) lcd_full_off();
         }

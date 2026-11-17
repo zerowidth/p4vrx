@@ -76,7 +76,7 @@ static const command_t s_commands[] = {
     {"reboot", cmd_reboot, "restart the P4; reboot download enters its ROM loader"},
     {"iq", iq_command, "iq [samples] captures the bus and prints levels; start [channel [every]] sets the C5 up; edge judges the sampling; dump sends the capture"},
     {"decode", decode_command, "decode on [channel] tunes the C5 and decodes NTSC continuously; off stops; alone shows lock and load"},
-    {"video", video_command, "frame and H.264 stats; grab sends the newest access unit, raw the newest decoded 720x480 frame; bitrate N; encode on|off; stagger 0|1|2 orders the LCD and encoder; lcd N gives the LCD every Nth field"},
+    {"video", video_command, "frame and H.264 stats; grab sends the newest access unit, raw the newest decoded 720x480 frame; bitrate N; encode on|off|auto (auto, the default, only while a UVC host streams); stagger 0|1|2 orders the LCD and encoder; lcd N gives the LCD every Nth field"},
     {"lcd", lcd_command, "the panel's frame rate and timings; rotate turns the picture half a turn"},
     {"ui", screen_command, "ui touch shows the touch controller and the last touch; ui open 0|1|2 opens the main strip, channel picker or band grid; ui pick <channel> tunes as a tap would"},
     {"still", still_command, "decodes one field of the last capture (iq 1400000) to 320x240 grey and sends it; inv flips sync polarity"},

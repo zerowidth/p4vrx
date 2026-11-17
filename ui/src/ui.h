@@ -55,6 +55,8 @@ int ui_strip_x(void);
 int ui_picture_x(void);
 /* Draws the UI: into the UI_STRIP_W x UI_H strip, or the whole UI_W x UI_H panel, as ui_layout says. */
 void ui_draw(canvas_t *c);
+/* The canvas rows [y0, y1) the last ui_draw changed; the rest is as it was. */
+void ui_drawn_rows(int *y0, int *y1);
 /* A touch at (x, y) in panel coordinates, down or lifted; true when it asks for an action. */
 bool ui_touch(int x, int y, bool down, ui_action_t *out);
 /* What the open menu wants scanned, with decoding paused: NULL for nothing, a band's letter, or "all". */
