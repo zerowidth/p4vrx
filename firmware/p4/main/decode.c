@@ -216,6 +216,9 @@ static bool s_despeck = true;
 /* The Nano demodulates (fm_top's control bit 2) and the ring holds its 14-bit frequencies, 2.44 kHz an LSB,
  * rather than the BitScrambler's phase bytes; the gain stays where it is set. */
 static bool s_fm;
+/* Lines from the Nano's line clock rather than the decoder's own slicer (see take_marks). */
+static bool s_marks, s_want_marks;
+static volatile bool s_nano_vsync;
 /* What `decode source` asks for; fm is used only when the Nano's bitstream has the demod. */
 static bool s_want_fm = true;
 /* The Nano's magnitude is the radius x 4 x 1.6468 / 32. */
@@ -483,6 +486,8 @@ static void control_fm(void)
     int magnitude;
     if (s_survey || !nano_magnitude(&magnitude)) return;
     s_rms = (int)lrintf(magnitude * FM_RADIUS_PER_MAGNITUDE);
+    bool vsync;
+    if (s_marks && nano_field_vsync(&vsync)) s_nano_vsync = vsync;
     s_clip_permille = s_rms > FM_CLIP_RADIUS ? CLIP_PERMILLE_HEAVY + 1 : 0;
     steer_gain(true);
 }
@@ -733,6 +738,7 @@ static void finish_field(void)
 /* The sync side's end of a field. */
 static void emit_field(void)
 {
+    if (s_marks) s_field_vsync = s_nano_vsync;
     if (!s_field_vsync && s_vsync_missed < VSYNC_REACQUIRE) ++s_vsync_missed;
     s_field_cut = false;
     s_burst = (int)hypotf(s_burst_re, s_burst_im);
@@ -1567,6 +1573,60 @@ static int marked_lanes(const uint8_t *b, uint32_t words)
 /* Demodulates a node's two bytes a sample; bytes is what the DMA wrote of the node. The marked
  * byte is on the even addresses from the first EOF after a start, and on the odd ones before it and from
  * each halt to the next EOF. */
+/* The Nano's line clock (fm_top build 4, control bit 5) marks each line's first sample in the low bits: code 31
+ * with the hit flag, then {half, parity, vline[8:5]} and vline[4:0] in the two after. In this mode the decoder
+ * renders each line from its mark rather than its own slicer. */
+typedef struct {
+    uint32_t at;
+    uint16_t vline;
+    uint8_t hit, half, parity;
+} mark_t;
+#define MARKS 8
+static mark_t s_mark_q[MARKS];
+static uint32_t s_mark_head, s_mark_tail, s_marks_seen, s_marks_dropped, s_mark_words, s_mark_31;
+
+static void take_marks(const uint8_t *b, uint32_t words, uint32_t n)
+{
+    static int part;
+    static mark_t m;
+    s_mark_words += words;
+    for (uint32_t k = 0; k < words; ++k) {
+        uint8_t low = b[2 * k] & 0x3f;
+        s_mark_31 += (low & 31) == 31;
+        if (part == 1) {
+            m.half = low >> 5 & 1, m.parity = low >> 4 & 1, m.vline = (low & 15) << 5;
+            part = 2;
+        } else if (part == 2) {
+            m.vline |= low & 31;
+            part = 0;
+            ++s_marks_seen;
+            if (s_mark_tail - s_mark_head < MARKS) s_mark_q[s_mark_tail++ % MARKS] = m;
+            else ++s_marks_dropped;
+        } else if ((low & 31) == 31) {
+            m.at = n + k, m.hit = low >> 5;
+            part = 1;
+        }
+    }
+}
+
+static void render_line(void);
+
+/* Each marked line once its samples, to RENDER_AT past its start, are in. */
+static void render_marks(uint32_t n)
+{
+    while (s_mark_head != s_mark_tail) {
+        const mark_t *m = &s_mark_q[s_mark_head % MARKS];
+        if ((int32_t)(n - (m->at + RENDER_AT)) < 0) break;
+        s_line = m->at;
+        s_line_frac = m->half ? 0x8000 : 0;
+        s_hit = m->hit;
+        s_vline = m->vline;
+        s_parity = m->parity;
+        render_line();
+        ++s_mark_head;
+    }
+}
+
 /* Power for each of the Nano's radius codes, in the units of s_bs_power: the square of the code's centre, less
  * 3.5 dB, by which band R read above raw (empty channels 29-34 against 23-32 dB, R4 57.4 against 54.3). */
 #define FM_POWER_TRIM 0.447f
@@ -1580,6 +1640,7 @@ static void process_fm(const uint8_t *b, uint32_t bytes)
     if (!s_fm_power[1])
         for (int c = 0; c < 32; ++c) s_fm_power[c] = (uint32_t)lrintf(powf((c + 0.5f) * FM_RADIUS_PER_MAGNITUDE, 2) * FM_POWER_TRIM);
     sweep_take(b, words, n, true, s_fm_power);
+    if (s_marks) take_marks(b, words, n);
     for (uint32_t done = 0; done < words;) {
         uint32_t at = n % HIST, run = words - done < HIST - at ? words - done : HIST - at;
         bs_demod(b + 2 * done, s_hist + at, s_blocks + at / 4, run / 16, &s_prev_phase, 1);
@@ -1590,6 +1651,7 @@ static void process_fm(const uint8_t *b, uint32_t bytes)
     }
     __atomic_store_n(&s_n, n, __ATOMIC_RELEASE);
     if (s_survey) coast(n);
+    else if (s_marks) render_marks(n);
     else if (!s_skip_detect) detect(n);
 }
 
@@ -1865,7 +1927,9 @@ void decode_stop(void)
 static esp_err_t start_bs(void)
 {
     /* Raw lanes unless the Nano demodulates; then it tracks the I/Q offsets itself too. */
-    nano_control(s_fm ? NANO_FM | NANO_TRACK_OFFSETS : 0);
+    s_marks = s_fm && s_want_marks && nano_build() >= 4;
+    s_mark_head = s_mark_tail = 0;
+    nano_control(s_fm ? NANO_FM | NANO_TRACK_OFFSETS | (s_marks ? NANO_MARKS : 0) : 0);
     if (s_fm) return ESP_OK;
     for (int c = 0; c < 32; ++c) {
         s_bs_power[c] = (uint32_t)lrintf(2 * iq_bs_code_centre(c) * iq_bs_code_centre(c));
@@ -1980,6 +2044,7 @@ static void status(void)
         s_running ? "running" : "stopped", s_channel, s_mhz, s_fm ? "the Nano's FM demod" : "raw lanes", (unsigned long)s_fields, (unsigned long)s_last_hits, FIELD_LINES,
         s_last_vsync_ok ? ", vsync" : ", no vsync", (unsigned long)(s_period >> 16),
         (unsigned long)((s_period & 0xffff) * 1000 >> 16));
+    if (s_marks) say("line clock from the Nano's marks: %lu seen, %lu dropped, %lu words, %lu code 31\n", (unsigned long)s_marks_seen, (unsigned long)s_marks_dropped, (unsigned long)s_mark_words, (unsigned long)s_mark_31);
     say("%lu vertical corrections, %lu broad pulses ignored outside the vsync window, %lu off the line's start or middle\n",
         (unsigned long)s_vjumps, (unsigned long)s_vsync_ignored, (unsigned long)s_vsync_noise);
 
@@ -2339,6 +2404,11 @@ void decode_command(int argc, char **argv)
         s_tnr_auto = strcmp(argv[2], "auto") == 0;
         if (!s_tnr_auto) s_tnr = atoi(argv[2]);
         if (argc > 3) s_tnr_mix = atoi(argv[3]);
+    } else if (strcmp(sub, "sync") == 0 && argc > 2) {
+        /* Whose line clock: the Nano's marks, or the P4's own slicer. From the next start. */
+        s_want_marks = strcmp(argv[2], "nano") == 0;
+        say("ok, the %s line clock at the next decode on\n", s_want_marks ? "Nano's" : "P4's");
+        return;
     } else if (strcmp(sub, "source") == 0 && argc > 2) {
         /* Takes effect at the next start. */
         s_want_fm = strcmp(argv[2], "fm") == 0;

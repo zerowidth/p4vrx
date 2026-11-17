@@ -377,6 +377,21 @@ bool nano_hdz(uint32_t *peak, uint32_t *total, uint16_t *bin, uint16_t *decision
     return true;
 }
 
+int nano_build(void)
+{
+    uint8_t id[3];
+    if (!s_nano) check_nano();
+    return nano_read(REG_ID, id, 3) && id[0] == 'P' && id[1] == 'V' ? id[2] : -1;
+}
+
+bool nano_field_vsync(bool *vsync)
+{
+    uint8_t st;
+    if (!nano_read(0x21, &st, 1)) return false;
+    *vsync = st & 1;
+    return true;
+}
+
 bool nano_has_fm(void)
 {
     uint8_t id[3];

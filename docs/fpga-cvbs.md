@@ -2,7 +2,14 @@
 
 Move the analog decoder from the P4 into the Nano in three stages, within the ceiling in [the budget](fpga-budget.md): 6,600 LUT4, 4,400 flops, 18 block RAMs, 4.5 DSP macros (18 MULT9), no PLL, and the SDRAM. At the end the Nano sends finished 720x480 frames, and the P4 does display, UI, UVC and the encoder.
 
-Status: stage 1 modelled (`models/cvbs_sync.py`, the P4 decoder's slicer, line clock, vsync and levels in integers). No RTL yet.
+Status, 2026-11-18: paused for HDZero. Stage 1 runs on hardware but is not finished:
+
+- `fpga/rtl/cvbs_sync.v` matches `models/cvbs_sync.py` bit for bit over 200 ms of R4 (3,146 lines, 11 fields), and closes at 47-51 MHz on the 40 MHz clock.
+- `fm_top` build 4 (SRAM only; the flash keeps build 3) runs it on the demod's phase steps, delays the stream 4,096 samples and marks each line in the low bits (control bit 5). It reported 253/254 hsyncs a field with vsync, and the P4 saw one mark per 847 samples with none dropped.
+- The P4's `decode sync nano|p4` (off by default) renders lines from the marks. It decoded R4 with colour, but core 1 read 80-88% against 55% on its own slicer, which isn't explained yet, and the A/B against the P4's slicer was cut short.
+- Next when resumed: find the core 1 load, finish the A/B, then stage 2.
+
+Earlier status: stage 1 modelled (`models/cvbs_sync.py`, the P4 decoder's slicer, line clock, vsync and levels in integers). No RTL yet.
 
 Stage 1 model, on a 200 ms capture of R4 (`iq grab 8000000`, 2026-11-17) turned into the P4's fm-mode phase steps through `models/fm_demod.py`: after the first two fields it held 253 and 254 hsyncs on alternate fields (the P4 decoder read 253 and 254 at the time), a vsync every field, alternating parity, and a line of 847.41-847.44 samples against the decoder's 847.39.
 

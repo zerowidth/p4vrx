@@ -66,7 +66,8 @@ namespace :fpga do
        "read_verilog #{verilog.join(" ")}; synth_gowin -top #{FPGA_TOP} -json #{json}; stat"
     sh fpga_tool("nextpnr-himbaechel"), "--json", json, "--write", pnr,
        "--device", FPGA_DEVICE, "--vopt", "family=#{FPGA_FAMILY}",
-       "--vopt", "cst=#{FPGA_BOARD_DIR}/#{FPGA_TOP}.cst", "--freq", "27",
+       # The demod and sync run at 40 MHz; nextpnr checks every clock against this one target.
+       "--vopt", "cst=#{FPGA_BOARD_DIR}/#{FPGA_TOP}.cst", "--freq", "40",
        "--report", "#{FPGA_BUILD}/report.json", "--log", "#{FPGA_BUILD}/nextpnr.log", "-q"
     sh fpga_tool("gowin_pack"), "-d", FPGA_FAMILY, "-o", FPGA_BITSTREAM, pnr
   end

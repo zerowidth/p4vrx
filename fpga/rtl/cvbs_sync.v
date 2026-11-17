@@ -137,7 +137,8 @@ module cvbs_sync (
         HOLD = 9, RENDER = 10, FIELD = 11, HIST = 12, HIST_R = 13, HIST_W = 14, TIP_A = 15, TIP_B = 16, TILT_A = 17,
         TILT_B = 18, PORCH = 19, ADVANCE = 20, THRESH = 21, BOXEND = 22, NEXT = 23, LEV_SUM = 24, LEV_DIV_50 = 25,
         LEV_DIV_50W = 26, LEV_TIP = 27, LEV_BAND = 28, LEV_BLANK = 29, LEV_CLEAR = 30, LEV_DIV_T = 31,
-        LEV_DIV_TW = 32, LEV_DIV_BW = 33, LEV_SET = 34, FIELD_DONE = 35, HIST_R2 = 36, PORCH_A = 37;
+        LEV_DIV_TW = 32, LEV_DIV_BW = 33, LEV_SET = 34, FIELD_DONE = 35, HIST_R2 = 36, PORCH_A = 37,
+        TILT_C = 38, TILT_D = 39, THRESH_B = 40, THRESH_C = 41;
     reg [5:0] state = WAIT, ret = WAIT, bx_ret = WAIT;
     reg signed [31:0] in_b = 0, t_sum = 0, p_sum = 0, edge_before = 0, hist_s = 0;
     reg [31:0] edge_near = 0, edge_best = 0, pulse_start = 0, pulse_width = 0, ptr = 0;
@@ -149,15 +150,21 @@ module cvbs_sync (
     reg [8:0] lev_tip = 0, lev_blank = 0, lev_lo = 0, lev_hi = 0;
     reg signed [31:0] new_tip = 0, new_blank = 0, vs_into = 0, vs_since = 0;
     reg lev_locked = 0, lev_found = 0;
-    integer m;
-    initial for (m = 0; m < 4; m = m + 1) edge_h[m] = 0;
-    initial for (m = 0; m < 16; m = m + 1) hist_q[m] = 0;
+    reg signed [31:0] tl_most = 0, tl_t = 0, th_span = 0, th_mid = 0, th_tilt4 = 0, th_clamp = 0;
+    integer m0;
+    initial begin
+        for (m0 = 0; m0 < 4; m0 = m0 + 1) edge_h[m0] = 0;
+        for (m0 = 0; m0 < 16; m0 = m0 + 1) hist_q[m0] = 0;
+    end
+    // The histogram's last 16 blocks, shifted as each comes in.
+    wire hist_shift = state == HIST_R2;
+    genvar g;
+    generate
+        for (g = 1; g < 16; g = g + 1) begin : hq
+            always @(posedge clk) if (hist_shift) hist_q[g] <= hist_q[g - 1];
+        end
+    endgenerate
 
-    // Thresholds from tip and blank, then tilted: set_thresholds and tilt_thresholds.
-    wire signed [31:0] span = blank - tip < 128 ? 128 : blank - tip;
-    wire signed [31:0] thr_mid = tdiv2(tip + blank, 5), hyst = span >>> 7;
-    wire signed [31:0] tilt4 = tdiv2(BOX * tilt, 4);
-    wire signed [31:0] clamp_m = tdiv2(BOX * (blank + tdiv2(span, 1)), 4);
 
     // The sliced box with this block in, and the block 16 back out.
     wire signed [31:0] out_b = nb < 64 ? 0 : (hb > clamp ? clamp : hb);
@@ -346,7 +353,6 @@ module cvbs_sync (
             end
             HIST_R: state <= HIST_R2;
             HIST_R2: begin
-                for (m = 15; m > 0; m = m - 1) hist_q[m] <= hist_q[m - 1];
                 hist_q[0] <= hb;
                 hist_s <= k >= 16 ? hist_s + hb - hist_q[15] : hist_s + hb;
                 k <= k + 1'd1;
@@ -385,15 +391,21 @@ module cvbs_sync (
                 div_go <= 1;
                 state <= TILT_B;
             end
+            // The tilt, a step a clock: most = (blank - tip) / 2, t = clamp(mean - tip, most), tilt += (t - tilt) / 2.
             TILT_B:
-                if (!div_go && !div_busy) begin : tl
-                    reg signed [31:0] t, most;
-                    most = tdiv2(blank - tip, 1);
-                    t = div_q - tip;
-                    t = t > most ? most : t < -most ? -most : t;
-                    tilt <= tilt + tdiv2(t - tilt, 1);
-                    state <= PORCH_A;
+                if (!div_go && !div_busy) begin
+                    tl_most <= tdiv2(blank - tip, 1);
+                    tl_t <= div_q - tip;
+                    state <= TILT_C;
                 end
+            TILT_C: begin
+                tl_t <= tl_t > tl_most ? tl_most : tl_t < -tl_most ? -tl_most : tl_t;
+                state <= TILT_D;
+            end
+            TILT_D: begin
+                tilt <= tilt + tdiv2(tl_t - tilt, 1);
+                state <= PORCH_A;
+            end
             PORCH_A: begin
                 k <= 0;
                 p_sum <= 0;
@@ -428,10 +440,21 @@ module cvbs_sync (
                 bx_ret <= NEXT;
                 state <= THRESH;
             end
+            // set_thresholds and tilt_thresholds, a step a clock.
             THRESH: begin
-                thr_lo <= BOX * (thr_mid - hyst) + tilt4;
-                thr_hi <= BOX * (thr_mid + hyst) + tilt4;
-                clamp <= clamp_m + tilt4;
+                th_span <= blank - tip < 128 ? 128 : blank - tip;
+                th_mid <= tdiv2(tip + blank, 5);
+                th_tilt4 <= tdiv2(BOX * tilt, 4);
+                state <= THRESH_B;
+            end
+            THRESH_B: begin
+                th_clamp <= tdiv2(BOX * (blank + tdiv2(th_span, 1)), 4);
+                thr_lo <= BOX * (th_mid - (th_span >>> 7)) + th_tilt4;
+                thr_hi <= BOX * (th_mid + (th_span >>> 7)) + th_tilt4;
+                state <= THRESH_C;
+            end
+            THRESH_C: begin
+                clamp <= th_clamp + th_tilt4;
                 k <= 0;
                 ptr <= nb;
                 box <= 0;

@@ -17,6 +17,7 @@ void nano_command(int argc, char **argv);
 #define NANO_FM 4
 #define NANO_TRACK_OFFSETS 8
 #define NANO_RAW40 16
+#define NANO_MARKS 32
 bool nano_control(uint8_t control);
 /* fm_top's mean CORDIC magnitude over the last 32768 samples. */
 bool nano_magnitude(int *magnitude);
@@ -26,3 +27,7 @@ bool nano_has_fm(void);
 bool nano_pll_phase(int phase);
 /* The HDZero detector's last decision (Nano build 3 or later). */
 bool nano_hdz(uint32_t *peak, uint32_t *total, uint16_t *bin, uint16_t *decisions);
+/* The Nano's build, or -1 without one. */
+int nano_build(void);
+/* Whether the Nano's line clock saw a vsync in its last field (build 4). */
+bool nano_field_vsync(bool *vsync);

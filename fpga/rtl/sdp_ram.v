@@ -2,7 +2,9 @@
 module sdp_ram #(
     parameter WIDTH = 32,
     parameter DEPTH = 1565,
-    parameter ABITS = 11
+    parameter ABITS = 11,
+    // Zero at configuration; yosys unrolls the loop, so very deep RAMs that don't care leave it off.
+    parameter ZERO = 1
 ) (
     input  wire             clk,
     input  wire             we,
@@ -13,7 +15,7 @@ module sdp_ram #(
 );
     reg [WIDTH-1:0] mem [0:DEPTH-1];
     integer k;
-    initial for (k = 0; k < DEPTH; k = k + 1) mem[k] = 0;
+    initial if (ZERO) for (k = 0; k < DEPTH; k = k + 1) mem[k] = 0;
     always @(posedge clk) begin
         if (we) mem[waddr] <= wdata;
         rdata <= mem[raddr];
