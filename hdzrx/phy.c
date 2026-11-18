@@ -244,14 +244,15 @@ static void set_cfo(rx_t *r, double cfo)
 /* Symbol k's spectrum, fftshifted (index b + 512 is bin b), as hdzrx's fft_symbols. */
 /* A bus word's 7-bit lane value: the byte is 2v+1. */
 static float lane_v(uint8_t b) { return (float)(((int8_t)b - 1) >> 1); }
+/* A header word: 6 bits a lane, I the low ones. */
+static int hdr12(uint16_t w) { return ((((int8_t)(w & 0xff) - 1) >> 1) & 0x3f) | ((((int8_t)(w >> 8) - 1) >> 1) & 0x3f) << 6; }
 
 static void symbol_words(const rx_t *r, int k, hz_cf *out)
 {
     const uint16_t *w = r->words + r->sym_off[k];
     /* the window's offset from its timing corrections: a phase ramp across the bins, turned back out */
-    int lo = (int)lane_v(w[-2] & 0xff) & 0x7f, hi = (int)lane_v(w[-2] >> 8) & 0x7f;
-    int off = (lo | hi << 7) << 18 >> 18;
-    int agc = ((int)lane_v(w[-1] & 0xff) & 0x7f) | ((int)lane_v(w[-1] >> 8) & 0x7f) << 7;
+    int off = hdr12(w[-2]);
+    int agc = hdr12(w[-1]);
     float scale = 32.0f / (agc ? agc : 32);
     for (int i = 0; i < HZ_N; ++i) {
         int bin = (i + 512 + r->kshift) & (HZ_N - 1);
@@ -795,28 +796,27 @@ int hz_receive(const uint16_t *raw, size_t n, double fs_in, const hz_opts *o, hz
 }
 
 /* The Nano's symbol stream (models/hdz_front.py's format): a (-64, -64) word, a header word {cfo_valid, resync,
- * count}, the window's offset, the AGC's gain, then 1,024 bins in bit-reversed order; (-64, 0) is idle. Returns the longest run of consecutive symbols
+ * count}, flags, the window's offset, the AGC's gain (12 bits each, 6 a lane), then 1,024 bins in bit-reversed
+ * order; (-64, 0) is idle. Returns the longest run of consecutive symbols
  * with the CFO settled and no resync inside, as word offsets. */
 int hz_symbol_run(const uint16_t *w, size_t n, int *off, int max, int *first_count)
 {
     int best_start = 0, best_len = 0, cur_start = 0, cur_len = 0, prev = -2, nsym = 0;
-    for (size_t i = 0; i + 4 + HZ_N <= n && nsym < max;) {
+    for (size_t i = 0; i + 5 + HZ_N <= n && nsym < max;) {
         if (w[i] != 0x8181) {
             ++i;
             continue;
         }
-        uint16_t h = w[i + 1];
-        int lo = (int)((int8_t)(h & 0xff) - 1) / 2 & 0x7f, hi = (int)((int8_t)(h >> 8) - 1) / 2 & 0x7f;
-        int hdr = lo | hi << 7, count = hdr & 0xfff, resync = hdr >> 12 & 1, cfo_ok = hdr >> 13 & 1;
+        int count = hdr12(w[i + 1]), flags = hdr12(w[i + 2]), resync = flags >> 1 & 1, cfo_ok = flags & 1;
         if (!cfo_ok || resync || count != ((prev + 1) & 0xfff)) {
             if (cur_len > best_len) best_len = cur_len, best_start = cur_start;
             cur_start = nsym, cur_len = 0;
         }
-        off[nsym++] = (int)(i + 4);
+        off[nsym++] = (int)(i + 5);
         if (cfo_ok) ++cur_len;
         else cur_start = nsym;
         prev = count;
-        i += 4 + HZ_N;
+        i += 5 + HZ_N;
     }
     if (cur_len > best_len) best_len = cur_len, best_start = cur_start;
     if (first_count) *first_count = best_start;
@@ -828,7 +828,7 @@ int hz_receive_symbols(const uint16_t *w, size_t n, const hz_opts *o, hz_info *i
 {
     rx_t *rp = begin(o, info);
     if (!rp) return -1;
-    int max = (int)(n / (HZ_N + 4)) + 1, first = 0;
+    int max = (int)(n / (HZ_N + 5)) + 1, first = 0;
     int *off = malloc(max * sizeof(int));
     if (!off) {
         end(rp);

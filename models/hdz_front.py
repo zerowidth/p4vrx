@@ -13,9 +13,10 @@ Blocks, in the order the RTL runs them, all integer:
 
 The output is what the P4 captures from the bus: 16-bit words, I in the low byte and Q in the high, each 2v+1
 from the 7-bit lane value v (as raw I/Q). v = -64 never occurs in a bin, so it marks: (-64, -64) a symbol header,
-whose next words carry {cfo_valid, resync, symbol count (12 bits)}, the window's offset in samples from where
-it would be without timing corrections since the last resync (14 bits, signed), so the receiver can turn the
-offset's phase ramp back out, and the AGC's gain (Q5) to divide back out; (-64, 0) is idle.
+whose next four words carry 12 bits each, as 6 bits a lane so none can read as a mark: the symbol count; flags
+(bit 0 cfo_valid, bit 1 resync); the window's offset in samples, mod 4096, from where it would be without timing
+corrections since the last resync, so the receiver can turn its phase ramp back out (the ramp repeats every
+1,024); and the AGC's gain (Q5) to divide back out. (-64, 0) is idle.
 
     uv run --with numpy python models/hdz_front.py CAPTURE_PREFIX OUT.u16 [--samples N] [--gain default|self|FILE.hex]
 
@@ -268,6 +269,8 @@ def front(i, q, taps=TAPS, shift=OUT_SHIFT, trace=None, float_fft=False, float_r
             while k + 1 < len(peaks) and peaks[k + 1][0] + UPDATE_DELAY <= t:
                 k += 1
             new = peaks[k][1]
+            # decided when the tentative start comes round: the NCO's state then says whether the CFO is set
+            cfo_ok = any(end + UPDATE_DELAY <= t for end, _ in steps)
             d = (new - t) % SYM
             d = d - SYM if d >= SYM // 2 else d
             resync = False
@@ -278,7 +281,6 @@ def front(i, q, taps=TAPS, shift=OUT_SHIFT, trace=None, float_fft=False, float_r
                 t += d
             if t + CP - FFT_BACK + N > L:
                 break
-            cfo_ok = any(end + UPDATE_DELAY <= t for end, _ in steps)
             starts.append((t, cfo_ok, resync))
             t += SYM
     w0 = np.array([s for s, _, _ in starts], np.int64)
@@ -289,7 +291,7 @@ def front(i, q, taps=TAPS, shift=OUT_SHIFT, trace=None, float_fft=False, float_r
         f = np.fft.fft((zr[win] << 2) + 1j * (zi[win] << 2), axis=1)[:, bin_order()] / N
         fr, fi = np.floor(f.real).astype(np.int64), np.floor(f.imag).astype(np.int64)
     else:
-        fr, fi = fft_r22(zr[win] << 2, zi[win] << 2)
+        fr, fi = fft_r22(sat(zr[win] << 2, 18), sat(zi[win] << 2, 18))
     # Output scaling: bin k of a symbol is f * G[k] * A >> (9 + OUT_SHIFT), G the per-bin gain table (Q4, 8 bits),
     # A the AGC (Q5, 8 bits). The AGC sums |v_re| + |v_im| over 64 output symbols, before saturation, and sets A for
     # the symbols from the 66th on so the mean comes to AGC_TARGET.
@@ -321,10 +323,10 @@ def front(i, q, taps=TAPS, shift=OUT_SHIFT, trace=None, float_fft=False, float_r
     for k, (t, cfo_ok, resync) in enumerate(starts):
         if k == 0 or resync:
             base = t - SYM * k
-        off = (t - SYM * k - base) & 0x3FFF
+        off = (t - SYM * k - base) & 0xFFF
         words.append(word(MARK, MARK))
-        hdr = (int(cfo_ok) << 13) | (int(resync) << 12) | (k & 0xFFF)
-        words.append(hdr_word(hdr))
+        words.append(hdr_word(k & 0xFFF))
+        words.append(hdr_word(int(cfo_ok) | int(resync) << 1))
         words.append(hdr_word(off))
         words.append(hdr_word(int(agcs[k])))
         words.extend(word(vr[k], vi[k]).tolist())
@@ -365,14 +367,38 @@ def word(vr, vi):
 
 
 def hdr_word(h):
-    """14 header bits as two 7-bit lane values, I = bits 0-6, Q = bits 7-13."""
-    lo, hi = h & 0x7F, (h >> 7) & 0x7F
-    lo = lo - 128 if lo >= 64 else lo
-    hi = hi - 128 if hi >= 64 else hi
-    return int(word(lo, hi))
+    """12 header bits as two 6-bit lane values, I = bits 0-5, Q = bits 6-11."""
+    return int(word(h & 0x3F, (h >> 6) & 0x3F))
+
+
+def tables(out_dir):
+    """The ROMs the RTL reads with $readmemh: resampler coefficients, NCO table, FFT twiddles."""
+    import os
+    h = coefficients(TAPS)
+    with open(os.path.join(out_dir, "hdz_resample.hex"), "w") as f:
+        for p in range(UP):
+            # one 72-bit word a phase, tap 7 in the top 9 bits
+            v = 0
+            for k in range(TAPS):
+                v |= (int(h[p, k]) & 0x1FF) << (9 * k)
+            f.write(f"{v:018x}\n")
+    c, sn = lut()
+    with open(os.path.join(out_dir, "hdz_nco.hex"), "w") as f:
+        for a, b in zip(c, sn):
+            f.write(f"{((int(b) & 0xFFF) << 12) | (int(a) & 0xFFF):06x}\n")
+    for size in (1024, 256, 64, 16):
+        q = size // 4
+        e = np.arange(3 * (q - 1) + 1)
+        wr, wi = twiddle(size, e)
+        with open(os.path.join(out_dir, f"hdz_tw{size}.hex"), "w") as f:
+            for a, b in zip(wr, wi):
+                f.write(f"{((int(b) & 0xFFFF) << 16) | (int(a) & 0xFFFF):08x}\n")
 
 
 def main(args):
+    if args and args[0] == "--tables":
+        tables(args[1])
+        return
     prefix = args[0].removesuffix(".bin")
     out = args[1]
     opt = dict(zip(args[2::2], args[3::2]))
