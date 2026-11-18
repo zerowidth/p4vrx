@@ -61,7 +61,8 @@ static void init(void)
     spec_lfsr("11101000110010011010010100011011", SCR_HP, 2 * 824, 0);
     spec_lfsr("01000100100010110001110011101010", SCR_LP, 2 * 824, 1);
     const int n = 2 * RS_HALF + 1;
-    double h[2 * RS_HALF + 1], sum = 0, fc = 1.0 / RS_DOWN, b0 = bessel_i0(5.0);
+    static double h[2 * RS_HALF + 1];
+    double sum = 0, fc = 1.0 / RS_DOWN, b0 = bessel_i0(5.0);
     for (int i = 0; i < n; ++i) {
         double m = i - RS_HALF, x = fc * m;
         double sinc = m == 0 ? 1 : sin(M_PI * x) / (M_PI * x);
@@ -96,6 +97,10 @@ static void xfree(const rx_t *r, void *p)
     else free(p);
 }
 static int64_t now(const rx_t *r) { return r->o->now_us ? r->o->now_us() : 0; }
+static void yield(const rx_t *r)
+{
+    if (r->o->yield) r->o->yield();
+}
 
 /* int8 I and Q of a word, at full scale (the lanes' 2v+1); hdzrx halves them, which happens after the DC sums. */
 static int lane_i(uint16_t w) { return (int8_t)(w & 0xff); }
@@ -132,6 +137,7 @@ static int resample(rx_t *r, const uint16_t *raw, int n)
             sq += lane_q(raw[REFL(k + DC_HALF)]) - lane_q(raw[REFL(k - DC_HALF)]);
             ++made;
         }
+        if (m % 32768 == 0) yield(r);
         hz_cf acc = 0;
         for (int i = i0; i <= i1; ++i) acc += RS_H[t + RS_HALF - RS_UP * i] * ring[i % RING];
         r->y[m] = acc;
@@ -149,6 +155,7 @@ static void cp_sync(rx_t *r)
     hz_cf s = 0;
     float e0 = 0, e1 = 0;
     for (int i = 0; i < n; ++i) {
+        if (i % 65536 == 0) yield(r);
         if (i % 1024 == 0) {
             s = 0, e0 = 0, e1 = 0;
             for (int k = 0; k < HZ_CP; ++k) {
@@ -196,6 +203,7 @@ static void set_cfo(rx_t *r, double cfo)
 static void symbol(const rx_t *r, int k, hz_cf *out)
 {
     static hz_cf buf[HZ_N];
+    if (k % 16 == 0) yield(r);
     int s = r->start + k * HZ_SYM + HZ_CP - FFT_BACK;
     double ph = fmod(-2 * M_PI * r->cfo * s / HZ_FS, 2 * M_PI);
     hz_cf r0 = (float)cos(ph) + I * (float)sin(ph);
@@ -603,7 +611,7 @@ static int decode_frame(rx_t *r, int fi, int a, int b, int nxt, hz_frame_cb cb, 
     static float med[HZ_N];
     static uint8_t noisy[HZ_N];
     int nm = 0;
-    float meds[HZ_N];
+    static float meds[HZ_N];
     for (int k = 0; k < HZ_N; ++k)
         if (errn[k]) med[k] = median(err + k * 112, errn[k]), meds[nm++] = med[k];
     float limit = 3 * median(meds, nm);

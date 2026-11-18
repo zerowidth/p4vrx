@@ -1,4 +1,5 @@
 #include "hdz.h"
+#include "hdzdec.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -80,6 +81,7 @@ void hdz_info(void)
 
 void hdz_command(int argc, char **argv)
 {
+    if (hdzdec_command(argc, argv)) return;
     if (argc > 2 && strcmp(argv[1], "fake") == 0) {
         s_fake = strcmp(argv[2], "1") == 0 ? 1 : strcmp(argv[2], "0") == 0 ? 0 : -1;
         if (s_fake < 0) s_above = s_below = 0;

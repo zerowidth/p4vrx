@@ -11,6 +11,12 @@
 void iq_command(int argc, char **argv);
 /* The last capture: I in the low byte, Q in the high byte, each read as 2v+1. */
 const uint16_t *iq_samples(size_t *count);
+/* Raw 40 MS/s I/Q from the Nano into the capture buffer, pausing the decoder; prints `ok grab ...`. */
+bool iq_grab(int n);
+/* The capture buffer, for samples uploaded from the host, and its size; iq_set_samples marks n of them as the last
+ * capture. */
+uint16_t *iq_buffer(size_t *bytes);
+void iq_set_samples(size_t n);
 /* Resets the C5 into c5rx, tunes it, starts its I/Q export with one of every `every` samples of its
  * 80 MS/s bus, finds a gain that doesn't clip, and moves the C5's clock until the P4's sampling edge reads the
  * lanes while they are steady. */

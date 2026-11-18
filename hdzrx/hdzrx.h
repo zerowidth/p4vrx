@@ -28,6 +28,8 @@ typedef struct {
     void *(*alloc)(size_t bytes);
     void (*release)(void *p);
     int64_t (*now_us)(void);
+    /* Called every few milliseconds of work, so a long decode can let other tasks run. */
+    void (*yield)(void);
     /* Optional buffer for the 27 MS/s samples (8 bytes a sample), the biggest allocation. */
     hz_cf *y_buf;
     size_t y_cap;
