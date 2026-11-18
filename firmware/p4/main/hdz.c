@@ -19,6 +19,8 @@ static bool s_on, s_have;
 static float s_score;
 static uint16_t s_bin, s_decisions;
 static int s_above, s_below;
+/* `hdz fake 1|0` holds the state there, for testing capture tooling without a transmitter; -1 follows the detector. */
+static int s_fake = -1;
 
 static void announce(void)
 {
@@ -35,6 +37,14 @@ void hdz_poll(void)
         return;
     }
     /* At 100 ms polls each read is a new decision, 2.5 ms apart; an unchanged count means no samples. */
+    if (s_fake >= 0) {
+        s_have = true;
+        if (s_on != s_fake) {
+            s_on = s_fake;
+            announce();
+        }
+        return;
+    }
     if (s_have && decisions == s_decisions) return;
     s_have = true;
     s_decisions = decisions;
@@ -64,11 +74,17 @@ void hdz_info(void)
         say("hdzero=- (no detector: Nano build 3 or later)\n");
         return;
     }
-    say("hdzero=%d score=%.2f peak_bin=%u decisions=%u ch=%s\n", s_on, (double)s_score, s_bin, s_decisions,
+    say("hdzero=%d%s score=%.2f peak_bin=%u decisions=%u ch=%s\n", s_on, s_fake >= 0 ? " fake=1" : "", (double)s_score, s_bin, s_decisions,
         decode_channel(&mhz));
 }
 
 void hdz_command(int argc, char **argv)
 {
+    if (argc > 2 && strcmp(argv[1], "fake") == 0) {
+        s_fake = strcmp(argv[2], "1") == 0 ? 1 : strcmp(argv[2], "0") == 0 ? 0 : -1;
+        if (s_fake < 0) s_above = s_below = 0;
+        say("ok hdz fake %s\n", s_fake < 0 ? "off" : s_fake ? "1" : "0");
+        return;
+    }
     hdz_info();
 }

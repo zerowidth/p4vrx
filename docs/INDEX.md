@@ -18,6 +18,7 @@ experiment changes them; the ledger and experiment notes keep the history.
 | Startup self-check: what it checks, what the Nano needs | [self-check.md](self-check.md) |
 | FM demod in the Nano: design, model results | [fpga-fm-demod.md](fpga-fm-demod.md) |
 | HDZero detector (cyclic prefix): design, model results | [fpga-cp-detect.md](fpga-cp-detect.md) |
+| HDZero at the event: capture and decode runbook | [hdzero-event.md](hdzero-event.md) |
 | Nano resource budget: what fits, HDZero reserve, CVBS ceiling | [fpga-budget.md](fpga-budget.md) |
 | CVBS decode in the Nano (phase 3b): design | [fpga-cvbs.md](fpga-cvbs.md) |
 | Where the reference firmware came from | [../reference/PROVENANCE.md](../reference/PROVENANCE.md) |

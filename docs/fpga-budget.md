@@ -1,5 +1,7 @@
 # Nano resource budget
 
+Priority (Nathan, 2026-11-18): HDZero first. Analog decode moves into the Nano only if it still fits afterwards, and only if it is simpler or more responsive than the P4's decoder.
+
 What the GW2AR-18 in the Tang Nano 20K has, what `fm_top` uses, what the HDZero PHY is expected to need, and the ceiling that leaves for CVBS decode (phase 3b).
 
 ## The device
