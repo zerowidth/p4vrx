@@ -63,6 +63,9 @@ typedef struct {
     int no_gap;
     /* 1: decode frames even when the CP correlation says this isn't OFDM (under HZ_MIN_CP). */
     int force;
+    /* 1: each frame takes its pilot offset, trim and noisy bins from the frame before (the first frame its own), as a
+     * streaming receiver would; for stage B in the Nano. */
+    int causal;
 } hz_opts;
 
 enum { HZ_T_LOAD, HZ_T_RESAMPLE, HZ_T_SYNC, HZ_T_WHOLE_BIN, HZ_T_RUNS, HZ_T_EQUALIZE, HZ_T_STREAM, HZ_T_CODEC, HZ_T_N };

@@ -572,8 +572,39 @@ static int points(const hz_cf *z, int o, hz_cf rot, hz_cf *pts, int16_t *bins)
     return n;
 }
 
+/* What a streaming receiver (the Nano's stage B) would carry from one frame to the next: the scattered-pilot offset
+ * (it steps by 8 every symbol), the per-bin trim and the noisy bins. */
+static struct {
+    int valid, o0, b;
+    hz_cf trim[HZ_N];
+    uint8_t noisy[HZ_N];
+    hz_cf w[HZ_N];
+} s_prev;
+
+static float qam_level(float v) { return fabsf(v) > 1.5f * A ? copysignf(2 * A, v) : copysignf(A, v); }
+
+/* Stage B's per-bin tracker: one complex tap a bin, normalised LMS on decisions, symbol by symbol, starting from the
+ * last frame's taps. Scattered-pilot positions are skipped. */
+static void track_bins(hz_cf *const *E, const int *offsets, int nd, hz_cf rot, hz_cf *w, float mu)
+{
+    for (int j = 0; j < nd; ++j)
+        for (int k = 0; k < HZ_N; ++k) {
+            int kk = k - 512;
+            if (!is_active(kk)) continue;
+            hz_cf x = E[j][k] * rot;
+            hz_cf z = x * w[k];
+            if (pymod(kk, 32) != offsets[j] && !is_cont(kk)) {
+                hz_cf d = qam_level(crealf(z)) + I * qam_level(cimagf(z));
+                float p = crealf(x * conjf(x));
+                if (p > 1e-6f) w[k] += mu * (d - z) * conjf(x) / p;
+            }
+            E[j][k] = z * conjf(rot);
+        }
+}
+
 static int decode_frame(rx_t *r, int fi, int a, int b, int nxt, const hz_mode *m, hz_frame_cb cb, void *ctx)
 {
+    const int causal = r->o->causal && s_prev.valid;
     const hz_opts *o = r->o;
     const int nd = m->ndata, PW = 16 * m->cols, Hh = 8 * m->rows, ecap = nd / 4 + 2;
     int nt = b - 1 - (a + 1);
@@ -601,7 +632,7 @@ static int decode_frame(rx_t *r, int fi, int a, int b, int nxt, const hz_mode *m
     snprintf(name, sizeof name, "f%d.H", fi);
     dump(r, name, H, HZ_N * sizeof(hz_cf));
     for (int j = 0; j < nd; ++j) symbol(r, b + j, X), equalize(X, H, Er[j]);
-    int o0 = scattered_offset_d0(Er, nd);
+    int o0 = causal ? pymod(s_prev.o0 - 8 * (b - s_prev.b), 32) : scattered_offset_d0(Er, nd);
     for (int j = 0; j < nd; ++j) offsets[j] = pymod(o0 - 8 * j, 32);
     for (int t = 0; t < nt; ++t) {
         hz_cf *tmp = W->tmp;
@@ -609,8 +640,28 @@ static int decode_frame(rx_t *r, int fi, int a, int b, int nxt, const hz_mode *m
         equalize(tmp, H, Tr[t]);
     }
     per_bin_trim(Er, offsets, nd, Tr, nt, trim);
-    for (int j = 0; j < nd; ++j)
-        for (int k = 0; k < HZ_N; ++k) Er[j][k] *= trim[k];
+    if (r->o->causal) {
+        /* this frame's trim is the next one's; this one takes the last frame's */
+        static hz_cf next[HZ_N];
+        memcpy(next, trim, sizeof next);
+        if (causal) memcpy(trim, s_prev.trim, sizeof next);
+        memcpy(s_prev.trim, next, sizeof next);
+        s_prev.o0 = o0, s_prev.b = b;
+    }
+    if (r->o->causal == 2 && causal) {
+        /* no trim: the tracker takes its place, on the rotation the training symbols give (T is real) */
+        double re = 0, im = 0;
+        for (int t = 0; t < nt; ++t)
+            for (int bb = -444; bb <= 444; ++bb)
+                if (is_active(bb)) re += fabsf(crealf(Tr[t][bb + 512])), im += fabsf(cimagf(Tr[t][bb + 512]));
+        track_bins(Er, offsets, nd, jpow(re > im ? 0 : 1), s_prev.w, 0.05f);
+        for (int k = 0; k < HZ_N; ++k) trim[k] = 1;
+    } else {
+        for (int j = 0; j < nd; ++j)
+            for (int k = 0; k < HZ_N; ++k) Er[j][k] *= trim[k];
+        if (r->o->causal == 2)
+            for (int k = 0; k < HZ_N; ++k) s_prev.w[k] = trim[k];
+    }
     snprintf(name, sizeof name, "f%d.trim", fi);
     dump(r, name, trim, HZ_N * sizeof(hz_cf));
     snprintf(name, sizeof name, "f%d.E", fi);
@@ -701,6 +752,13 @@ static int decode_frame(rx_t *r, int fi, int a, int b, int nxt, const hz_mode *m
         if (errn[k]) med[k] = median(err + (size_t)k * ecap, errn[k]), meds[nm++] = med[k];
     float limit = 3 * median(meds, nm);
     for (int k = 0; k < HZ_N; ++k) noisy[k] = errn[k] && med[k] > limit;
+    if (r->o->causal) {
+        static uint8_t this_frame[HZ_N];
+        memcpy(this_frame, noisy, HZ_N);
+        if (causal) memcpy(noisy, s_prev.noisy, HZ_N);
+        memcpy(s_prev.noisy, this_frame, HZ_N);
+        s_prev.valid = 1;
+    }
     for (int i = 0; i < nslots; ++i)
         if (!(slots[i] & 0x20)) slots[i] |= noisy[slot_bin[i] + 512] << 4;
     snprintf(name, sizeof name, "f%d.slots", fi);
@@ -728,6 +786,7 @@ out:
 
 static int back_end(rx_t *rp, const hz_opts *o, hz_info *info, hz_frame_cb cb, void *ctx, int gate)
 {
+    s_prev.valid = 0;
     int64_t t0 = now(rp);
     whole_bin_cfo(rp);
     info->cfo_hz = rp->cfo;

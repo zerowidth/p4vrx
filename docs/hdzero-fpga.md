@@ -2,7 +2,7 @@
 
 Move the HDZero receiver's PHY from the P4 (`hdzrx/`, the C port of hdzrx) into the Nano, model first, each block bit for bit with its model in simulation. Stage A puts the front end in the Nano and sends per-symbol spectra to the P4; stage B adds equalise, demap and descramble so slots go out instead.
 
-Status, 2026-11-18: stage A modelled (`models/hdz_front.py`), and the C receiver decodes its output (`hz_receive_symbols`, `hdzrx_host --words`). No RTL yet.
+Status, 2026-11-18: stage A modelled (`models/hdz_front.py`) and in RTL (`fpga/rtl/hdz_front.v`, `hdz_fft.v`, `hdz_r22.v`), bit for bit with the model in iverilog (`models/hdz_front_check.py`, `models/hdz_fft_check.py`); `fm_top` build 5 puts it on the bus (control bit 6). The C receiver decodes its stream on the Mac and the P4 (`hz_receive_symbols`; `hdz decode src=nano`). Stage B prototyped in C.
 
 ## Stage A: front end
 
@@ -54,6 +54,21 @@ The C receiver on the model's stream against it on the samples (float front end)
 
 About 16.5 DSP macros with `fm_top`'s 6.5 makes 23 of 24, which is tight; synthesis will tell. The FFT can use the three-multiplier complex product.
 
-## Stage B, next
+## Stage B: equalise, demap, descramble
 
-Equalise, demap and descramble in the Nano need the frame's training run (channel), per-symbol pilots (common phase and slope) and a per-bin trim. hdzrx's trim uses the whole frame's data (409 symbols) before deciding any bit, which a streaming design can't hold; the plan is to try the previous frame's trim in the C receiver first, then port.
+hdzrx's back end looks at the whole frame before deciding a bit: the scattered-pilot offset by the boost over all 409 data symbols, and a per-bin trim from the 4th power of all of them. A streaming receiver can't hold the frame, so stage B was tried causally in the C receiver first (`hdzrx_host --causal 1|2`), the first frame bootstrapped as now:
+
+- The pilot offset steps by 8 every symbol, training and X included, so once known it is predicted from the symbol count since the last frame.
+- `--causal 1`: each frame takes the previous frame's trim and noisy bins.
+- `--causal 2`: no trim; a per-bin tracker, one complex tap a bin, normalised LMS (mu 0.05) on 16-QAM decisions, symbol by symbol, its taps carried from frame to frame. The 0/90 degree choice comes from the training symbols, which arrive before the data; the 0/180 one is an inversion of HP bits that can be flagged at the frame's end and applied by the P4.
+
+On 200 ms of 191206, 191225 and 191250 (11 frames each), decision error on |k| < 300, and the share of slots that agree with the batch decode on bins neither flags as noisy:
+
+| | Batch (hdzrx) | Previous frame's trim | Per-bin LMS |
+| --- | --- | --- | --- |
+| 191206 | -16.4 to -20.2 dB | -14.6 to -19.5 dB | -16.4 to -21.4 dB |
+| 191225 | -17.4 to -20.3 dB | -15.9 to -19.6 dB | -17.4 to -21.6 dB |
+| 191250 | -14.9 to -17.2 dB | -14.5 to -17.2 dB | -14.8 to -17.2 dB |
+| Agreement with batch, 191225 | | 74-97% | 88-96% |
+
+The tracker's decision error is optimistic (it adapts toward its own decisions), but its slots also agree with the batch decode better than the previous frame's trim does. It is the plan for stage B: per bin a tap (1,024 complex words, one block RAM), per data bin a decision, an error and an update, which is one complex multiply-accumulate a bin at the symbol rate. The outer bins (300-444) on 191250 lose about 1 dB against batch, and the noisy-bin flags from the previous frame conceal more records; both are open.

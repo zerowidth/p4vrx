@@ -1,7 +1,7 @@
 /* Mac build of the receiver: decode a capture and write each stage's intermediates for tools/hdzcompare.py.
  *
  *     hdzrx_host PREFIX OUTDIR [--window N] [--frames N] [--dump all|none|name,name] [--no-conceal]
- *         [--mode NAME] [--ref-runs] [--no-gap] [--force]
+ *         [--mode NAME] [--ref-runs] [--no-gap] [--force] [--causal 1|2]
  *         [--words FILE: the Nano's symbol stream, as models/hdz_front.py writes it, instead of the capture]
  *
  * Takes the first N samples (default 1,400,000, what the P4 decodes) after the capture's unsettled ones. */
@@ -95,6 +95,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--ref-runs")) o.ref_runs = 1;
         else if (!strcmp(argv[i], "--no-gap")) o.no_gap = 1;
         else if (!strcmp(argv[i], "--force")) o.force = 1;
+        else if (!strcmp(argv[i], "--causal") && i + 1 < argc) o.causal = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--words") && i + 1 < argc) s_words = argv[++i];
     }
     char path[1024];
