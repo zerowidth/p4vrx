@@ -2,6 +2,30 @@
 
 How to collect HDZero I/Q with the p4vrx receiver and see what it decodes to, on the Mac, within a minute or so of a pilot powering up.
 
+## The event build
+
+The capture kit as tested is tagged `event-capture-2026-11-18` (git tag; jj bookmark `event-capture`). Later work on the Nano's HDZero PHY may change the P4, C5 or Nano, so to go back for a capture:
+
+```bash
+jj workspace add ../p4vrx-event -r event-capture-2026-11-18
+```
+
+Then, in `../p4vrx-event`:
+
+```bash
+rake p4:flash
+```
+
+```bash
+rake c5:flash
+```
+
+```bash
+TOP=fm_top rake fpga:build fpga:flash
+```
+
+The Nano's flash held `fm_top` build 3 when the tag was made; the tag's sources build `fm_top` build 4 (build 3 plus the paused analog sync stage, off unless the P4 turns it on), which the tagged P4 firmware also runs with. Afterwards, `jj workspace forget p4vrx-event` and flash the current build again.
+
 ## Before
 
 - The Nano runs `fm_top` build 3 or later from its flash (`nano read 0 3` gives `50 56 03`), and `selftest` says ok.
