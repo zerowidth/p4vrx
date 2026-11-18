@@ -23,7 +23,22 @@ static const int CONT[NCONT] = {-444, -400, -360, -312, -280, -240, -224, -200, 
 static const int CONT_VALUE[NCONT] = {-1, 1, -1, -1, -1, 1, 1, 1, 1, 1, -1, -1, -1, 1, 1, 1, 1, -1, 1, 1, -1, -1, -1, 1};
 static const float A = 0.44721359549995793f; /* 1/sqrt(5): 16-QAM levels at unit mean power (section 5.1) */
 
+#define EXPJ_N 4096
+static hz_cf EXPJ[EXPJ_N + 1];
+
+/* exp(ja) from a table with linear interpolation, within 3e-7: sinf and cosf per bin were most of the P4's time. */
+static hz_cf expj(float a)
+{
+    float t = a * (float)(EXPJ_N / (2 * M_PI));
+    float fl = floorf(t), f = t - fl;
+    int i = (int)fl & (EXPJ_N - 1);
+    return EXPJ[i] + f * (EXPJ[i + 1] - EXPJ[i]);
+}
+
 static uint8_t SCR_HP[2 * 824], SCR_LP[2 * 824];
+static hz_cf BACK[HZ_N];
+static uint8_t INTERP_P[HZ_N];
+static float INTERP_F[HZ_N];
 static float RS_H[2 * RS_HALF + 1];
 static int s_init;
 
@@ -71,6 +86,15 @@ static void init(void)
         sum += h[i];
     }
     for (int i = 0; i < n; ++i) RS_H[i] = (float)(h[i] / sum * RS_UP);
+    for (int i = 0; i < HZ_N; ++i) {
+        int k = i - 512, p = 0;
+        while (p < NCONT - 2 && CONT[p + 1] < k) ++p;
+        float f = (float)(k - CONT[p]) / (CONT[p + 1] - CONT[p]);
+        INTERP_P[i] = (uint8_t)p;
+        INTERP_F[i] = f < 0 ? 0 : f > 1 ? 1 : f;
+    }
+    for (int i = 0; i <= EXPJ_N; ++i) EXPJ[i] = (float)cos(2 * M_PI * i / EXPJ_N) + I * (float)sin(2 * M_PI * i / EXPJ_N);
+    for (int i = 0; i < HZ_N; ++i) BACK[i] = (float)cos(2 * M_PI * (i - 512) * FFT_BACK / HZ_N) + I * (float)sin(2 * M_PI * (i - 512) * FFT_BACK / HZ_N);
     s_init = 1;
 }
 
@@ -209,10 +233,7 @@ static void symbol(const rx_t *r, int k, hz_cf *out)
     hz_cf r0 = (float)cos(ph) + I * (float)sin(ph);
     for (int m = 0; m < HZ_N; ++m) buf[m] = r->y[s + m] * (r0 * r->rot[m]);
     hz_fft(buf);
-    for (int i = 0; i < HZ_N; ++i) {
-        float a = (float)(2 * M_PI * (i - 512) * FFT_BACK / HZ_N);
-        out[i] = buf[(i + 512) % HZ_N] * (cosf(a) + I * sinf(a));
-    }
+    for (int i = 0; i < HZ_N; ++i) out[i] = buf[(i + 512) % HZ_N] * BACK[i];
 }
 
 /* Section 13.2 step 5. A shift of k whole bins only moves the spectrum by k and turns every symbol by the same
@@ -307,17 +328,14 @@ static void linfit(const float *y, float *a, float *b)
     *a = (float)(ym - *b * xm);
 }
 
+/* np.interp(k, CONT, fp) for the 1,024 bins, from a segment and weight per bin worked out once. */
 static float interp(int k, const float *fp)
 {
-    if (k <= CONT[0]) return fp[0];
-    if (k >= CONT[NCONT - 1]) return fp[NCONT - 1];
-    int p = 0;
-    while (CONT[p + 1] < k) ++p;
-    float f = (float)(k - CONT[p]) / (CONT[p + 1] - CONT[p]);
+    int p = INTERP_P[k + 512];
+    float f = INTERP_F[k + 512];
     return fp[p] + f * (fp[p + 1] - fp[p]);
 }
 
-static hz_cf expj(float a) { return cosf(a) + I * sinf(a); }
 
 /* Channel from a training run without the T table: walk outward from each continual pilot, keeping the sign that
  * keeps the phase continuous (hdzrx's channel_from_training). */
@@ -375,7 +393,8 @@ static void equalize(const hz_cf *St, const hz_cf *H, hz_cf *out)
     for (int i = 0; i < HZ_N; ++i) {
         int k = i - 512;
         hz_cf g = interp(k, mag) * expj(a + b * k + interp(k, res));
-        out[i] = St[i] / (H[i] * g + 1e-9f);
+        hz_cf d = H[i] * g + 1e-9f;
+        out[i] = St[i] * conjf(d) / crealf(d * conjf(d));
     }
 }
 

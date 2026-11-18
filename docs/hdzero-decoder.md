@@ -51,3 +51,5 @@ On the P4 (2026-11-18, analog decoder running alongside), 191225 uploaded: both 
 | channel, equalise, trim (2 frames) | 4,936 |
 | specials, noisy bins, slots (2 frames) | 854 |
 | codec (2 frames) | 1,019 |
+
+With exp(jx) from a 4,096-entry table (within 3e-7), the window correction precomputed and the pilot interpolation's segments worked out once, the same run took 8.6 s and still matched at every stage: resample 1,226, CP sync 546, whole-bin CFO 280, training runs 642, equalise 2,220, slots 847, codec 1,021 ms. The rest of the 8.6 s is the dumps going out over USB during the run.
