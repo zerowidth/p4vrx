@@ -26,6 +26,8 @@ typedef struct {
     /* Which dumps are wanted: called before building one, so unwanted large ones cost nothing. */
     int (*want)(void *ctx, const char *name);
     void *(*alloc)(size_t bytes);
+    /* For the decoder's 150 KB of tables and scratch, read on every bin: fast memory if there is some free. */
+    void *(*alloc_fast)(size_t bytes);
     void (*release)(void *p);
     int64_t (*now_us)(void);
     /* Called every few milliseconds of work, so a long decode can let other tasks run. */

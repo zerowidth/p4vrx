@@ -95,6 +95,8 @@ static void *s_fb[3];
 static int s_back;
 static volatile bool s_queued;
 static volatile bool s_paused;
+/* A frame to show once while held, such as a decoded HDZero burst. */
+static const uint8_t *volatile s_still;
 static SemaphoreHandle_t s_vsync;
 static TaskHandle_t s_task;
 static const uint8_t *volatile s_pending;
@@ -376,6 +378,13 @@ static void lcd_task(void *arg)
     uint32_t frames = 0;
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        if (s_paused && s_still) {
+            const uint8_t *still = s_still;
+            s_still = NULL;
+            show(still);
+            s_pause_drawn = true;
+            continue;
+        }
         if (s_paused) {
             /* No frames come while the picture is held, so a changed strip, or the whole-panel UI, goes into every
              * buffer, the one on screen too. */
@@ -431,6 +440,13 @@ void lcd_blank(void)
     if (!s_paused) return;
     for (int k = 0; k < 3; ++k) clear(s_fb[k]);
     strip_dirty(0, LCD_W);
+    if (s_task) xTaskNotifyGive(s_task);
+}
+
+void lcd_still(const uint8_t *yuv)
+{
+    s_paused = true;
+    s_still = yuv;
     if (s_task) xTaskNotifyGive(s_task);
 }
 

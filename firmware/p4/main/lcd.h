@@ -15,6 +15,8 @@ bool lcd_busy(void);
 void lcd_command(int argc, char **argv);
 /* Keeps the last frame on the panel while true; the strip still updates. */
 void lcd_hold(bool hold);
+/* Holds the picture and shows this one frame (same format as lcd_offer, kept valid until lcd_hold(false)). */
+void lcd_still(const uint8_t *yuv);
 /* While held, blacks out the picture, for when the last frame had no signal; the strip is put back. */
 void lcd_blank(void);
 /* The UI strip right of the picture: draw between these, and the panel shows it from the next frames. */

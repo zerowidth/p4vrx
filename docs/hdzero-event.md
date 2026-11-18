@@ -28,7 +28,13 @@ Without detection (a weak signal, or to grab regardless): `--now` takes one capt
 uv run python tools/hdzdecode.py captures/hdz
 ```
 
-One line per capture: CP strength (HDZero reads 3-7x, analog and noise about 1), carrier offset, frames, how many had special symbols, and the concealed-record median. PNG frames and the full log are in each `-frames/` folder. On the 2026-11-04 captures: 191225 and 191250 decode with 11 frames and specials in each; 191237 partly; 191206 syncs but its bits don't decode.
+One line per capture: CP strength (HDZero reads 3-7x, analog and noise about 1), carrier offset, frames, how many had special symbols, and the concealed-record median. PNG frames and the full log are in each `-frames/` folder. On the 2026-11-04 captures: 191225 and 191250 decode with 11 frames and specials in each; 191237 partly; 191206 syncs but its bits don't decode (hdzrx's float32 running sum in cp_sync, see [the gap list](hdzero-gaps.md); the C decoder decodes it).
+
+## Decode on the P4
+
+- `hdz decode` grabs 1.4M samples (35 ms) and decodes one frame on the P4 in about 5 s, with the analog decoder paused, and holds the frame on the LCD until `hdz show off`. It prints `hdz frame {...}` and `ok hdz run frames=N cp=… cfo=…`.
+- To check the P4 against hdzrx on what it just saw: `uv run --with pyserial --with-requirements ../hdzero-captures/requirements.txt python tools/hdzrun.py --grab`. It grabs, fetches the I/Q, runs it on the P4 with dumps, and prints the stage-by-stage compare and the first stage that differs.
+- On a capture already on the Mac: `tools/hdzrun.py captures/hdz/iq-CH-TIME` uploads it and does the same. `decode on` reuses the capture buffer, so upload after tuning.
 
 ## What to look for
 

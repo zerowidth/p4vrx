@@ -20,6 +20,9 @@ Later FPGA stages (timing, CFO, resampler, FFT) replace stages 1-4 behind the sa
 - `hdz upload N` takes N raw I/Q words over the USB console into the capture buffer (4.5 MB/s), `hdz run [frames=N] [dump=...]` decodes the capture buffer, and `hdz decode [samples]` grabs from the Nano first. Results come back as `hdz frame {json}` and `hdz info {json}` lines, dumps as `dump NAME BYTES`, base64, `dump end`.
 - `tools/hdzrun.py PREFIX` uploads a capture's first 1.4M samples, runs it, saves the dumps and PNGs to `captures/hdzc/<name>-p4/` and runs the compare on them; `--grab` does it live.
 - The 27 MS/s samples go in the capture buffer after the burst, so the decoder's own PSRAM is about 7 MB (11.1 MB was free).
+- Its 150 KB of tables and scratch are allocated for each burst and freed after it: as static arrays in internal RAM they left the analog decoder no room for its DMA ring (`decode: no memory for the ring`). The P4 tries internal RAM first, but with the ring allocated the largest free block is 48 KB, so they land in PSRAM, which costs nothing measurable.
+- The first frame goes to the LCD (`lcd_still`), 16:9 letterboxed in the 4:3 picture, held until `hdz show off`. The PPA reads U on even rows of the packed 4:2:0.
+- `hdz decode` keeps the analog decoder paused through the decode. One frame of 191225 took 4.9 s with analog decoding stopped and 10.2 s alongside it (the analog decoder then logged 11 overruns, against 1).
 
 ## Memory
 

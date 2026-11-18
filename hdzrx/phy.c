@@ -24,7 +24,31 @@ static const int CONT_VALUE[NCONT] = {-1, 1, -1, -1, -1, 1, 1, 1, 1, 1, -1, -1, 
 static const float A = 0.44721359549995793f; /* 1/sqrt(5): 16-QAM levels at unit mean power (section 5.1) */
 
 #define EXPJ_N 4096
-static hz_cf EXPJ[EXPJ_N + 1];
+
+
+static uint8_t SCR_HP[2 * 824], SCR_LP[2 * 824];
+static float RS_H[2 * RS_HALF + 1];
+
+typedef struct {
+    const hz_opts *o;
+    hz_info *info;
+    hz_cf *y;
+    int L;
+    int start;
+    double cfo;
+    hz_cf rot[HZ_N];
+} rx_t;
+
+/* Tables and scratch, about 150 KB, allocated for each burst and freed after it, so internal RAM is only taken
+ * while decoding and the analog decoder's DMA ring can have it otherwise. */
+static struct {
+    hz_cf expj[EXPJ_N + 1], back[HZ_N], buf[HZ_N], cur[HZ_N], prev[HZ_N], z[HZ_N], tmp[HZ_N], pts[MAX_PTS];
+    uint8_t interp_p[HZ_N], noisy[HZ_N];
+    float interp_f[HZ_N], pw[HZ_N], med[HZ_N], meds[HZ_N];
+    int16_t bins[MAX_PTS];
+    double h[2 * RS_HALF + 1];
+    rx_t r;
+} *W;
 
 /* exp(ja) from a table with linear interpolation, within 3e-7: sinf and cosf per bin were most of the P4's time. */
 static hz_cf expj(float a)
@@ -32,15 +56,8 @@ static hz_cf expj(float a)
     float t = a * (float)(EXPJ_N / (2 * M_PI));
     float fl = floorf(t), f = t - fl;
     int i = (int)fl & (EXPJ_N - 1);
-    return EXPJ[i] + f * (EXPJ[i + 1] - EXPJ[i]);
+    return W->expj[i] + f * (W->expj[i + 1] - W->expj[i]);
 }
-
-static uint8_t SCR_HP[2 * 824], SCR_LP[2 * 824];
-static hz_cf BACK[HZ_N];
-static uint8_t INTERP_P[HZ_N];
-static float INTERP_F[HZ_N];
-static float RS_H[2 * RS_HALF + 1];
-static int s_init;
 
 static int pymod(int a, int m) { return ((a % m) + m) % m; }
 static int floordiv2(int a) { return a >= 0 ? a / 2 : -((-a + 1) / 2); }
@@ -76,8 +93,7 @@ static void init(void)
     spec_lfsr("11101000110010011010010100011011", SCR_HP, 2 * 824, 0);
     spec_lfsr("01000100100010110001110011101010", SCR_LP, 2 * 824, 1);
     const int n = 2 * RS_HALF + 1;
-    static double h[2 * RS_HALF + 1];
-    double sum = 0, fc = 1.0 / RS_DOWN, b0 = bessel_i0(5.0);
+    double *h = W->h, sum = 0, fc = 1.0 / RS_DOWN, b0 = bessel_i0(5.0);
     for (int i = 0; i < n; ++i) {
         double m = i - RS_HALF, x = fc * m;
         double sinc = m == 0 ? 1 : sin(M_PI * x) / (M_PI * x);
@@ -90,23 +106,13 @@ static void init(void)
         int k = i - 512, p = 0;
         while (p < NCONT - 2 && CONT[p + 1] < k) ++p;
         float f = (float)(k - CONT[p]) / (CONT[p + 1] - CONT[p]);
-        INTERP_P[i] = (uint8_t)p;
-        INTERP_F[i] = f < 0 ? 0 : f > 1 ? 1 : f;
+        W->interp_p[i] = (uint8_t)p;
+        W->interp_f[i] = f < 0 ? 0 : f > 1 ? 1 : f;
     }
-    for (int i = 0; i <= EXPJ_N; ++i) EXPJ[i] = (float)cos(2 * M_PI * i / EXPJ_N) + I * (float)sin(2 * M_PI * i / EXPJ_N);
-    for (int i = 0; i < HZ_N; ++i) BACK[i] = (float)cos(2 * M_PI * (i - 512) * FFT_BACK / HZ_N) + I * (float)sin(2 * M_PI * (i - 512) * FFT_BACK / HZ_N);
-    s_init = 1;
+    for (int i = 0; i <= EXPJ_N; ++i) W->expj[i] = (float)cos(2 * M_PI * i / EXPJ_N) + I * (float)sin(2 * M_PI * i / EXPJ_N);
+    for (int i = 0; i < HZ_N; ++i) W->back[i] = (float)cos(2 * M_PI * (i - 512) * FFT_BACK / HZ_N) + I * (float)sin(2 * M_PI * (i - 512) * FFT_BACK / HZ_N);
 }
 
-typedef struct {
-    const hz_opts *o;
-    hz_info *info;
-    hz_cf *y;
-    int L;
-    int start;
-    double cfo;
-    hz_cf rot[HZ_N];
-} rx_t;
 
 static int want(const rx_t *r, const char *name) { return r->o->dump && (!r->o->want || r->o->want(r->o->ctx, name)); }
 static void dump(const rx_t *r, const char *name, const void *d, size_t n)
@@ -226,14 +232,14 @@ static void set_cfo(rx_t *r, double cfo)
 /* Symbol k's spectrum, fftshifted (index b + 512 is bin b), as hdzrx's fft_symbols. */
 static void symbol(const rx_t *r, int k, hz_cf *out)
 {
-    static hz_cf buf[HZ_N];
+    hz_cf *buf = W->buf;
     if (k % 16 == 0) yield(r);
     int s = r->start + k * HZ_SYM + HZ_CP - FFT_BACK;
     double ph = fmod(-2 * M_PI * r->cfo * s / HZ_FS, 2 * M_PI);
     hz_cf r0 = (float)cos(ph) + I * (float)sin(ph);
     for (int m = 0; m < HZ_N; ++m) buf[m] = r->y[s + m] * (r0 * r->rot[m]);
     hz_fft(buf);
-    for (int i = 0; i < HZ_N; ++i) out[i] = buf[(i + 512) % HZ_N] * BACK[i];
+    for (int i = 0; i < HZ_N; ++i) out[i] = buf[(i + 512) % HZ_N] * W->back[i];
 }
 
 /* Section 13.2 step 5. A shift of k whole bins only moves the spectrum by k and turns every symbol by the same
@@ -242,14 +248,14 @@ static void whole_bin_cfo(rx_t *r)
 {
     int L = r->L < 400 * HZ_SYM ? r->L : 400 * HZ_SYM;
     int nsym = (L - r->start) / HZ_SYM - 1;
-    static hz_cf cur[HZ_N], prev[HZ_N];
+    hz_cf *cur = W->cur, *prev = W->prev;
     hz_cf acc[7] = {0};
     for (int t = 0; t < nsym; ++t) {
         symbol(r, t, cur);
         if (t)
             for (int k = -3; k <= 3; ++k)
                 for (int p = 0; p < NCONT; ++p) acc[k + 3] += cur[CONT[p] + k + 512] * conjf(prev[CONT[p] + k + 512]);
-        memcpy(prev, cur, sizeof cur);
+        memcpy(prev, cur, HZ_N * sizeof(hz_cf));
     }
     int best = 0;
     for (int k = 1; k < 7; ++k)
@@ -263,7 +269,7 @@ static void training_runs(rx_t *r)
 {
     int nsym = (r->L - r->start) / HZ_SYM - 1;
     r->info->nsym = nsym;
-    static hz_cf cur[HZ_N], prev[HZ_N];
+    hz_cf *cur = W->cur, *prev = W->prev;
     uint8_t *hi = calloc(nsym > 1 ? nsym : 1, 1);
     float *cs = r->o->dump ? calloc(nsym > 1 ? nsym : 1, sizeof(float)) : NULL;
     for (int t = 0; t < nsym; ++t) {
@@ -282,7 +288,7 @@ static void training_runs(rx_t *r)
             hi[t - 1] = v > 0.6f;
             if (cs) cs[t - 1] = v;
         }
-        memcpy(prev, cur, sizeof cur);
+        memcpy(prev, cur, HZ_N * sizeof(hz_cf));
     }
     if (cs) dump(r, "coherence", cs, (size_t)(nsym - 1) * sizeof(float));
     free(cs);
@@ -331,8 +337,8 @@ static void linfit(const float *y, float *a, float *b)
 /* np.interp(k, CONT, fp) for the 1,024 bins, from a segment and weight per bin worked out once. */
 static float interp(int k, const float *fp)
 {
-    int p = INTERP_P[k + 512];
-    float f = INTERP_F[k + 512];
+    int p = W->interp_p[k + 512];
+    float f = W->interp_f[k + 512];
     return fp[p] + f * (fp[p + 1] - fp[p]);
 }
 
@@ -341,8 +347,8 @@ static float interp(int k, const float *fp)
  * keeps the phase continuous (hdzrx's channel_from_training). */
 static void channel_from_training(hz_cf *const *T, int nt, hz_cf *H)
 {
-    static hz_cf Z[HZ_N];
-    memset(Z, 0, sizeof Z);
+    hz_cf *Z = W->z;
+    memset(Z, 0, HZ_N * sizeof(hz_cf));
     const hz_cf *ref = T[0];
     for (int t = 0; t < nt; ++t) {
         hz_cf d[NCONT], m = 0;
@@ -452,7 +458,7 @@ static float median(float *v, int n)
  * angle(mean T^2) / 2, gain from data power. Scattered-pilot REs are left out of the data statistics. */
 static void per_bin_trim(hz_cf *const *E, const int *offsets, hz_cf *const *Teq, int nt, hz_cf *trim)
 {
-    static float pw[HZ_N];
+    float *pw = W->pw;
     for (int k = 0; k < HZ_N; ++k) {
         int kk = k - 512, km = pymod(kk, 32);
         hz_cf t2 = 0, p4 = 0;
@@ -549,8 +555,8 @@ static int decode_frame(rx_t *r, int fi, int a, int b, int nxt, hz_frame_cb cb, 
     int offsets[HZ_N_DATA];
     for (int j = 0; j < HZ_N_DATA; ++j) offsets[j] = pymod(o0 - 8 * j, 32);
     for (int t = 0; t < nt; ++t) {
-        static hz_cf tmp[HZ_N];
-        memcpy(tmp, Tr[t], sizeof tmp);
+        hz_cf *tmp = W->tmp;
+        memcpy(tmp, Tr[t], HZ_N * sizeof(hz_cf));
         equalize(tmp, H, Tr[t]);
     }
     per_bin_trim(Er, offsets, Tr, nt, trim);
@@ -562,7 +568,7 @@ static int decode_frame(rx_t *r, int fi, int a, int b, int nxt, hz_frame_cb cb, 
     dump(r, name, E, (size_t)HZ_N_DATA * HZ_N * sizeof(hz_cf));
     int x_off = -1;
     if (xi >= 0) {
-        static hz_cf tmp[HZ_N];
+        hz_cf *tmp = W->tmp;
         symbol(r, xi, tmp);
         equalize(tmp, H, X);
         for (int k = 0; k < HZ_N; ++k) X[k] *= trim[k];
@@ -579,8 +585,8 @@ static int decode_frame(rx_t *r, int fi, int a, int b, int nxt, hz_frame_cb cb, 
             }
     int q0 = sre > sim ? 0 : 1, bestq = q0;
     float bestz = -1;
-    static hz_cf pts[MAX_PTS];
-    static int16_t bins[MAX_PTS];
+    hz_cf *pts = W->pts;
+    int16_t *bins = W->bins;
     for (int q = q0; q <= q0 + 2; q += 2) {
         long zeros = 0, total = 0;
         for (int j = 5; j < 60; ++j) {
@@ -627,10 +633,10 @@ static int decode_frame(rx_t *r, int fi, int a, int b, int nxt, hz_frame_cb cb, 
             }
         for (int i = 0; i < n; ++i) slots[nslots] = slot_bits(pts[i], i), slot_bin[nslots++] = bins[i];
     }
-    static float med[HZ_N];
-    static uint8_t noisy[HZ_N];
+    float *med = W->med;
+    uint8_t *noisy = W->noisy;
     int nm = 0;
-    static float meds[HZ_N];
+    float *meds = W->meds;
     for (int k = 0; k < HZ_N; ++k)
         if (errn[k]) med[k] = median(err + k * 112, errn[k]), meds[nm++] = med[k];
     float limit = 3 * median(meds, nm);
@@ -661,40 +667,49 @@ out:
 
 int hz_receive(const uint16_t *raw, size_t n, double fs_in, const hz_opts *o, hz_info *info, hz_frame_cb cb, void *ctx)
 {
-    if (!s_init) init();
-    static rx_t r;
-    memset(&r, 0, sizeof r);
+    W = o->alloc_fast ? o->alloc_fast(sizeof *W) : NULL;
+    if (!W) W = o->alloc ? o->alloc(sizeof *W) : malloc(sizeof *W);
+    if (!W) return -1;
+    init();
+    rx_t *rp = &W->r;
+    memset(rp, 0, sizeof *rp);
     memset(info, 0, sizeof *info);
-    r.o = o, r.info = info;
+    rp->o = o, rp->info = info;
     (void)fs_in; /* 40 MS/s only, as the resampler's 27/40 */
-    int64_t t0 = now(&r);
-    if (resample(&r, raw, (int)n)) return -1;
-    info->us[HZ_T_RESAMPLE] = now(&r) - t0;
-    dump(&r, "y", r.y, (size_t)r.L * sizeof(hz_cf));
-    t0 = now(&r);
-    cp_sync(&r);
-    set_cfo(&r, r.cfo);
-    info->start = r.start;
-    info->us[HZ_T_SYNC] = now(&r) - t0;
-    t0 = now(&r);
-    whole_bin_cfo(&r);
-    info->cfo_hz = r.cfo;
-    info->us[HZ_T_WHOLE_BIN] = now(&r) - t0;
-    t0 = now(&r);
-    training_runs(&r);
-    info->us[HZ_T_RUNS] = now(&r) - t0;
+    int64_t t0 = now(rp);
+    if (resample(rp, raw, (int)n)) {
+        xfree(rp, W);
+        W = NULL;
+        return -1;
+    }
+    info->us[HZ_T_RESAMPLE] = now(rp) - t0;
+    dump(rp, "y", rp->y, (size_t)rp->L * sizeof(hz_cf));
+    t0 = now(rp);
+    cp_sync(rp);
+    set_cfo(rp, rp->cfo);
+    info->start = rp->start;
+    info->us[HZ_T_SYNC] = now(rp) - t0;
+    t0 = now(rp);
+    whole_bin_cfo(rp);
+    info->cfo_hz = rp->cfo;
+    info->us[HZ_T_WHOLE_BIN] = now(rp) - t0;
+    t0 = now(rp);
+    training_runs(rp);
+    info->us[HZ_T_RUNS] = now(rp) - t0;
     int frames = 0, max = o->max_frames > 0 ? o->max_frames : 99;
     for (int i = 0; i < info->nruns && frames < max; ++i) {
         int a = info->runs[i][0], b = info->runs[i][1];
         if (b + HZ_N_DATA > info->nsym) break;
         int nxt = i + 1 < info->nruns ? info->runs[i + 1][0] : -1;
-        if (decode_frame(&r, frames, a, b, nxt, cb, ctx)) {
+        if (decode_frame(rp, frames, a, b, nxt, cb, ctx)) {
             frames = -1;
             break;
         }
         ++frames;
     }
     info->frames = frames;
-    if (r.y != o->y_buf) xfree(&r, r.y);
+    if (rp->y != o->y_buf) xfree(rp, rp->y);
+    xfree(rp, W);
+    W = NULL;
     return frames;
 }

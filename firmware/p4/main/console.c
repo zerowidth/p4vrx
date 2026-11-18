@@ -87,7 +87,7 @@ static const command_t s_commands[] = {
     {"usb", usb_command, "the console's USB state; usb suspend reports a suspend the host never sent, to test the recovery"},
     {"pins", pins_command, "pins read lists the Nano-facing pins (lanes pulled down); drive <name> <0|1>, release, or bus on|off"},
     {"selftest", selftest_command, "stops decoding, checks the C5, its EN and BOOT wires, the bus enable, PCLK and the 14 lanes, and resumes"},
-    {"hdz", hdz_command, "the HDZero detector, one key=value line: hdzero, score, peak_bin, decisions, ch; changes also print `event hdzero=...`; hdz fake 1|0|off holds the state for testing; hdz upload N takes N raw I/Q words; hdz run decodes the capture buffer and hdz decode [samples] grabs first (frames=N window=N conceal=0|1 dump=all|name,...)"},
+    {"hdz", hdz_command, "the HDZero detector, one key=value line: hdzero, score, peak_bin, decisions, ch; changes also print `event hdzero=...`; hdz fake 1|0|off holds the state for testing; hdz upload N takes N raw I/Q words; hdz run decodes the capture buffer and hdz decode [samples] grabs first (frames=N window=N conceal=0|1 dump=all|name,... show=0|1); the first frame stays on the LCD until hdz show off"},
     {"nano", nano_command, "nano read <reg> [n] | nano write <reg> <byte>...: the Nano's I2C registers, in hex"},
     {"cpu", cpu_command, "cpu [ms] shows each task's share of its core over a window, and each core's idle time"},
     {"c5", c5_command, "c5 hold keeps it in reset; c5 reset runs its app; c5 start also waits for c5rx; c5 boot resets it into its ROM loader; c5 pins reads EN, BOOT, RX and TX with pull-downs; c5 log on|off relays its UART; c5 send talks to c5rx"},
