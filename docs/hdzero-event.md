@@ -4,10 +4,12 @@ How to collect HDZero I/Q with the p4vrx receiver and see what it decodes to, on
 
 ## The event build
 
-The capture kit as tested is tagged `event-capture-2026-11-18` (git tag; jj bookmark `event-capture`). Later work on the Nano's HDZero PHY may change the P4, C5 or Nano, so to go back for a capture:
+Use `event-capture-2026-11-18b` (git tag; jj bookmark `event-capture-b`). The first tag, `event-capture-2026-11-18`, has a fault in its raw grabs: the 40 MHz bus doubled 0.4-1.2% of words, each a one-sample timing slip for HDZero ([the doubled words](experiments/2026-11-18-nano-link-doubles.md)). In the b build the Nano (`fm_top` build 6) flips alternate words and the P4 drops the doubles after every grab; its `ok grab` line says how many (`doubled=N`, typically 0.1-0.3%).
+
+The boards were left on the b build: the P4 flashed, the Nano's flash holding `fm_top` 6 (`nano read 0 3` gives `50 56 06`), the C5 with its `11p` command. To put them back on it from another checkout:
 
 ```bash
-jj workspace add ../p4vrx-event -r event-capture-2026-11-18
+jj workspace add ../p4vrx-event -r event-capture-2026-11-18b
 ```
 
 Then, in `../p4vrx-event`:
@@ -24,7 +26,9 @@ rake c5:flash
 TOP=fm_top rake fpga:build fpga:flash
 ```
 
-The Nano's flash held `fm_top` build 3 when the tag was made; the tag's sources build `fm_top` build 4 (build 3 plus the paused analog sync stage, off unless the P4 turns it on), which the tagged P4 firmware also runs with. Afterwards, `jj workspace forget p4vrx-event` and flash the current build again.
+Afterwards, `jj workspace forget p4vrx-event`. The P4 firmware needs `fm_top` 6 or later for clean raw grabs: with an older Nano image it skips the clean-up and the doubles stay in.
+
+Fallback if raw grabs misbehave: the C5-clock path made the Nov 4 captures, but only with the old pass-through bitstream (`TOP=passthru_lockout_top`); with `fm_top` the lockout takes one C5 clock edge in three, so `iq start CH 2` then `iq N` gives 13.3 MS/s, too slow for HDZero.
 
 ## Before
 

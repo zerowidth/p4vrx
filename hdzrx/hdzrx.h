@@ -107,9 +107,11 @@ typedef void (*hz_frame_cb)(void *ctx, const hz_frame *f);
 /* raw: the capture's u16 words (I low byte, Q high byte, int8 each). Returns frames decoded, or -1 on no memory. */
 int hz_receive(const uint16_t *raw, size_t n, double fs_in, const hz_opts *o, hz_info *info, hz_frame_cb cb, void *ctx);
 
-/* The same receiver on the Nano's per-symbol spectra (16-bit bus words, models/hdz_front.py's format) instead of
- * samples: whole bins, training runs, frames and codec as above. info->start is the first symbol used. */
-int hz_receive_symbols(const uint16_t *words, size_t n, const hz_opts *o, hz_info *info, hz_frame_cb cb, void *ctx);
+/* The same receiver on the Nano's per-symbol spectra (16-bit bus words, models/hdz_front.py's format, with idle
+ * words anywhere; the buffer is compacted in place) instead of samples: whole bins, training runs, frames and codec as above. info->start is the first symbol used. */
+int hz_receive_symbols(uint16_t *words, size_t n, const hz_opts *o, hz_info *info, hz_frame_cb cb, void *ctx);
+/* Removes the idle words in place (hz_receive_symbols does it first); returns the words left. */
+size_t hz_drop_idle(uint16_t *words, size_t n);
 int hz_symbol_run(const uint16_t *words, size_t n, int *off, int max, int *first_count);
 
 /* Section 11.2's display stage for one row: `coded` pixels to `width` RGB pixels. */

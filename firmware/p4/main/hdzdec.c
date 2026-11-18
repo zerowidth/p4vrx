@@ -114,7 +114,7 @@ static void run(int frames, size_t window, int conceal)
     iq_pause_decoder();
     iq_buffer_hold(true);
     /* words: the Nano's per-symbol spectra (NANO_HDZ) rather than raw I/Q */
-    int got = s_words ? hz_receive_symbols(raw, n, &o, &info, on_frame, NULL) : hz_receive(raw, n, 40e6, &o, &info, on_frame, NULL);
+    int got = s_words ? hz_receive_symbols((uint16_t *)raw, n, &o, &info, on_frame, NULL) : hz_receive(raw, n, 40e6, &o, &info, on_frame, NULL);
     iq_buffer_hold(false);
     iq_resume_decoder();
     int64_t total = esp_timer_get_time() - t0;

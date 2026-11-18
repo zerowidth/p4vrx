@@ -20,10 +20,19 @@ void nano_command(int argc, char **argv);
 #define NANO_MARKS 32
 /* HDZero spectra on the bus (fm_top build 5): docs/hdzero-fpga.md. */
 #define NANO_HDZ 64
+/* With NANO_RAW40 or NANO_HDZ: a 14-bit count instead, one a 40 MHz clock (build 5 on). */
+#define NANO_COUNT 128
 bool nano_control(uint8_t control);
 /* fm_top's mean CORDIC magnitude over the last 32768 samples. */
 bool nano_magnitude(int *magnitude);
 /* Whether the Nano's bitstream has the FM demod (build 2 or later). */
+/* What the Nano's image has: fm_top is analog, hdz_top HDZero (docs/hdzero-fpga.md). Build 5 on reports it in 0x29,
+ * where raw 40 MS/s is always there. */
+#define NANO_HAS_FM 1
+#define NANO_HAS_HDZ 2
+#define NANO_HAS_CVBS 4
+#define NANO_HAS_RAW40 8
+int nano_features(void);
 bool nano_has_fm(void);
 /* fm_top's 40 MHz PLL phase, 0-15. */
 bool nano_pll_phase(int phase);

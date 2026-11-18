@@ -778,11 +778,64 @@ void iq_resume_decoder(void)
     s_held = false;
 }
 
+/* The P4's sampling edge for grabs: rising, unless `iq grab ... neg`. */
+static parlio_sample_edge_t s_grab_edge = PARLIO_SAMPLE_EDGE_POS;
+/* `iq grab ... count`: the Nano sends a 14-bit count, one a 40 MHz clock, to test the link. */
+static bool s_grab_count;
+/* `iq grab ... raw`: leave the doubled words and the flips in, to study the link. */
+static bool s_grab_raw;
+
+/* Builds 6 on flip each lane's top bit in every other 40 MHz word, because switching noise gives the P4 an extra
+ * PCLK edge now and then: a word sampled twice, or once more mid-change with a bit or two wrong (tools/linktest.py:
+ * 0.4-1.2% extra, none lost). An extra word keeps the previous word's top bits and differs from it in two bits at
+ * most; a real next word has its top bits flipped unless both lanes changed sign and nothing else. Those are
+ * dropped, then the flips undone: raw I/Q per 4,096 words by whichever choice leaves the smoother signal (the wrong
+ * one is 64 lane steps off every other sample), spectra at every idle word, (-64, 0) as sent and (0, -64) flipped,
+ * which no bin can be. Exact on the Nov 4 HDZero capture and an analog one with 0.4% extras put in. Returns the
+ * words left. */
+static int lane7(uint8_t b) { return ((int8_t)b - 1) >> 1; }
+
+static size_t undouble(uint16_t *w, size_t n, bool spectra, size_t *doubled)
+{
+    size_t k = 0;
+    uint16_t prev = 0;
+    for (size_t i = 0; i < n; ++i) {
+        uint16_t x = w[i] ^ prev;
+        bool extra = i && !(x & 0x8080) && __builtin_popcount(x) <= 2;
+        prev = w[i];
+        if (!extra) w[k++] = w[i];
+    }
+    *doubled = n - k;
+    if (spectra) {
+        int flip = 0;
+        for (size_t i = 0; i < k; ++i) {
+            if (w[i] == 0x0181) flip = 0;
+            else if (w[i] == 0x8101) flip = 1;
+            if (flip) w[i] ^= 0x8080;
+            flip ^= 1;
+        }
+        return k;
+    }
+    for (size_t s = 0; s < k; s += 4096) {
+        size_t e = s + 4096 < k ? s + 4096 : k;
+        long rough[2] = {0, 0};
+        for (int p = 0; p < 2; ++p)
+            for (size_t i = s; i + 1 < e; ++i) {
+                uint16_t a = w[i] ^ (((i - s) & 1) == (size_t)p ? 0x8080 : 0);
+                uint16_t b = w[i + 1] ^ (((i + 1 - s) & 1) == (size_t)p ? 0x8080 : 0);
+                rough[p] += abs(lane7(a & 0xff) - lane7(b & 0xff)) + abs(lane7(a >> 8) - lane7(b >> 8));
+            }
+        for (size_t i = s + (rough[0] <= rough[1] ? 0 : 1); i < e; i += 2) w[i] ^= 0x8080;
+    }
+    return k;
+}
+
 bool iq_grab(int n, bool wide, bool hold, bool spectra)
 {
     if (n <= 0 || n > MAX_SAMPLES) n = CAPTURE_SAMPLES;
-    if (!nano_has_fm()) {
-        say("err grab needs the Nano's fm_top\n");
+    int feat = nano_features();
+    if (nano_build() < 3 || (spectra && !(feat & NANO_HAS_HDZ))) {
+        say(spectra ? "err grab spectra needs the Nano's hdz_top\n" : "err grab needs the Nano's fm_top build 3 or later\n");
         return false;
     }
     if (!prepare()) return false;
@@ -791,7 +844,9 @@ bool iq_grab(int n, bool wide, bool hold, bool spectra)
     int64_t t0 = esp_timer_get_time();
     bool was = decode_rx_pause();
     int every = s_every;
-    nano_control(spectra ? NANO_HDZ : NANO_RAW40);
+    bool count = s_grab_count;
+    nano_control((spectra ? NANO_HDZ : NANO_RAW40) | (count ? NANO_COUNT : 0));
+    s_grab_count = false;
     s_every = 2;
     bus_enable(true);
     char reply[48] = "", back[48] = "";
@@ -805,6 +860,13 @@ bool iq_grab(int n, bool wide, bool hold, bool spectra)
     if (!restored) say("iq grab: C5 kept its wide filter (%s)\n", back);
     s_every = every;
     nano_control(0);
+    size_t doubled = 0;
+    bool keep = s_grab_raw;
+    s_grab_raw = false;
+    if (err == ESP_OK && !count && !keep && nano_build() >= 6) {
+        n = (int)undouble(s_psram, (size_t)n, spectra, &doubled);
+        s_len = n;
+    }
     /* Taken before the decoder resumes: something in it has overwritten 256-byte blocks of this buffer. */
     uint32_t crc = err == ESP_OK ? esp_rom_crc32_le(0, (const uint8_t *)s_psram, (size_t)n * 2) : 0;
     if (was && !hold) decode_rx_resume();
@@ -812,9 +874,9 @@ bool iq_grab(int n, bool wide, bool hold, bool spectra)
     unsigned mhz;
     const char *ch = iq_channel(&mhz);
     if (err != ESP_OK) say("err grab: %s\n", esp_err_to_name(err));
-    else say("ok grab samples=%d rate=40000000 ch=%s mhz=%u gain=%d hdzero=%d score=%.2f filter=%s%s%s crc=%08lx%s%s paused_ms=%lld\n", n,
+    else say("ok grab samples=%d rate=40000000 ch=%s mhz=%u gain=%d hdzero=%d score=%.2f filter=%s%s%s crc=%08lx doubled=%u%s%s paused_ms=%lld\n", n,
              ch, mhz, decode_gain(), hdz, (double)score, wide ? "wide" : "narrow", wide ? " c5=" : "", wide ? reply : "",
-             (unsigned long)crc, s_held ? " held=1" : "", spectra ? " data=spectra" : "", (esp_timer_get_time() - t0) / 1000);
+             (unsigned long)crc, (unsigned)doubled, s_held ? " held=1" : "", spectra ? " data=spectra" : "", (esp_timer_get_time() - t0) / 1000);
     return err == ESP_OK;
 }
 
@@ -842,6 +904,10 @@ void iq_command(int argc, char **argv)
             if (strcmp(argv[k], "wide") == 0) wide = true;
             else if (strcmp(argv[k], "hold") == 0) hold = true;
             else if (strcmp(argv[k], "spectra") == 0) spectra = true;
+            else if (strcmp(argv[k], "neg") == 0) s_grab_edge = PARLIO_SAMPLE_EDGE_NEG;
+            else if (strcmp(argv[k], "count") == 0) s_grab_count = true;
+            else if (strcmp(argv[k], "raw") == 0) s_grab_raw = true;
+            else if (strcmp(argv[k], "pos") == 0) s_grab_edge = PARLIO_SAMPLE_EDGE_POS;
             else if (atoi(argv[k]) > 0) s_wide_settle_ms = atoi(argv[k]);
         }
         iq_grab(argc > 2 ? atoi(argv[2]) : 0, wide, hold, spectra);

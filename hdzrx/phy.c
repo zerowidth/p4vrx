@@ -883,8 +883,18 @@ int hz_symbol_run(const uint16_t *w, size_t n, int *off, int max, int *first_cou
     return best_len;
 }
 
-int hz_receive_symbols(const uint16_t *w, size_t n, const hz_opts *o, hz_info *info, hz_frame_cb cb, void *ctx)
+/* The bus is faster than the bins, so idle words fall between a symbol's bins; no bin or header word can be one. */
+size_t hz_drop_idle(uint16_t *w, size_t n)
 {
+    size_t k = 0;
+    for (size_t i = 0; i < n; ++i)
+        if (w[i] != 0x0181) w[k++] = w[i];
+    return k;
+}
+
+int hz_receive_symbols(uint16_t *w, size_t n, const hz_opts *o, hz_info *info, hz_frame_cb cb, void *ctx)
+{
+    n = hz_drop_idle(w, n);
     rx_t *rp = begin(o, info);
     if (!rp) return -1;
     int max = (int)(n / (HZ_N + 5)) + 1, first = 0;

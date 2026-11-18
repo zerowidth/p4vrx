@@ -11,10 +11,17 @@
 //   0x10-0x11 I and Q offsets, signed, as the lanes read 2v+1; reads give the ones in use
 //   0x12-0x13 mean CORDIC magnitude over the last 32768 samples, low byte first (holding the high byte)
 //   0x08 bit 4: raw 40 MS/s, the lanes as sampled on the 40 MHz clock with PCLK from it, for I/Q captures
-//   0x08 bit 5: CVBS line markers (fpga/rtl/cvbs_sync.v). The fm stream goes out 4096 samples late, the radius
+//   0x08 bit 5: CVBS line markers (fpga/rtl/cvbs_sync.v), only with WITH_CVBS (off: it doesn't fit beside HDZero). The fm stream goes out 4096 samples late, the radius
 //        code stops at 30, and a line's first sample carries code 31 with the hit flag as D5; the next two carry
 //        {half, parity, vline[8:5]} and {0, vline[4:0]}
 //   0x20 last field's hsyncs (low 8 bits), 0x21 status: bit 0 vsync in the last field, 1 the engine fell behind
+//   In raw 40 MS/s and spectra modes every other word goes out with each lane's top bit flipped, so the P4 can find
+//   doubled ones.
+//   0x08 bit 7: with bit 4 or 6, the lanes carry n x 0x2d5b mod 2^14 for clock n, to test the link (tools/linktest.py)
+//   0x29 features: bit 0 FM demod, 1 HDZero front end, 2 CVBS sync (build 5 on; earlier builds have FM from 2)
+//   0x08 bit 6: HDZero spectra (fpga/rtl/hdz_front.v, docs/hdzero-fpga.md) on the lanes, PCLK from the 40 MHz clock
+//        as raw 40 MS/s; 0x22-0x23 the front end's timing peak (11 bits), 0x24-0x25 its CFO angle (2^-16 turns),
+//        0x26 its AGC (Q5), 0x27-0x28 the last symbol count put out (12 bits), low bytes first
 //   0x14-0x1f HDZero detector (fpga/rtl/cp_detect.v): fold peak, fold total (32 bits each), peak bin and
 //             decisions (16 bits each), low bytes first; reading 0x14 holds them all for the reads after
 // lockout_regs_top's description:
@@ -27,7 +34,12 @@
 //   0x09-0x0a lane pattern, D7..D0 then D13..D8
 // The bus is still driven only while the P4 holds IRQ high.
 module fm_top #(
-    parameter [7:0] BUILD = 8'h04
+    parameter [7:0] BUILD = 8'h06,
+    // Analog and HDZero don't fit together (docs/hdzero-fpga.md): this is the analog image, and hdz_top the HDZero
+    // one, the same with FM demod and CVBS sync left out and the HDZero front end in.
+    parameter WITH_FM = 1,
+    parameter WITH_CVBS = 1,
+    parameter WITH_HDZ = 0
 ) (
     input  wire        clk_27m,
     output wire        spk_en,
@@ -103,7 +115,7 @@ module fm_top #(
     always @(negedge clk40) pclk_b <= pclk_a;
     wire pclk_fm = pclk_a | pclk_b;
     reg signed [7:0] dc_i_set = 0, dc_q_set = 0, dc_i_auto = 0, dc_q_auto = 0;
-    reg [5:0] control40 = 0;
+    reg [7:0] control40 = 0;
     always @(posedge clk40) control40 <= control;
     wire signed [7:0] dc_i = control40[3] ? dc_i_auto : dc_i_set;
     wire signed [7:0] dc_q = control40[3] ? dc_q_auto : dc_q_set;
@@ -116,10 +128,15 @@ module fm_top #(
             fm_phase <= fm_phase + fm_out * 3;
             fm_radius <= {magnitude >= 9'd25, magnitude > 9'd31 ? 5'd31 : magnitude[4:0]};
         end
+    generate if (WITH_FM) begin : g_fm
     fm_demod demod (
         .clk(clk40), .in_i(lanes40[6:0]), .in_q(lanes40[13:7]), .dc_i(dc_i), .dc_q(dc_q),
         .take(third == 1), .out(fm_out), .magnitude(magnitude)
     );
+    end else begin : g_no_fm
+        assign fm_out = 0;
+        assign magnitude = 0;
+    end endgenerate
     wire [31:0] cp_peak, cp_total;
     wire [10:0] cp_bin;
     wire [15:0] cp_decisions;
@@ -127,6 +144,20 @@ module fm_top #(
         .clk(clk40), .valid(1'b1), .in_i(lanes40[6:0]), .in_q(lanes40[13:7]), .dc_i(dc_i), .dc_q(dc_q),
         .peak(cp_peak), .total(cp_total), .peak_bin(cp_bin), .decisions(cp_decisions)
     );
+    // HDZero front end: per-symbol spectra as bus words, every clk40.
+    wire [6:0] hz_i, hz_q;
+    wire [10:0] hz_peak;
+    wire [15:0] hz_theta;
+    wire [7:0] hz_agc;
+    wire [11:0] hz_symbols;
+    generate if (WITH_HDZ) begin : g_hdz
+        hdz_front hz (
+            .clk(clk40), .in_v(1'b1), .in_i(lanes40[6:0]), .in_q(lanes40[13:7]), .out_i(hz_i), .out_q(hz_q),
+            .peak_bin(hz_peak), .theta(hz_theta), .agc(hz_agc), .symbols(hz_symbols)
+        );
+    end else begin : g_no_hdz
+        assign {hz_i, hz_q, hz_peak, hz_theta, hz_agc, hz_symbols} = 0;
+    end endgenerate
     // The decoder's 8-bit phase steps at 13.33 MS/s, into the sync engine, the sample after the phase updates.
     reg sync_take = 0;
     reg signed [7:0] sync_step = 0;
@@ -143,12 +174,19 @@ module fm_top #(
     wire [31:0] line_start, sync_period;
     wire [15:0] line_frac;
     wire [8:0] line_vline, field_hits;
-    cvbs_sync sync (
-        .clk(clk40), .take(sync_take), .step(sync_step), .line_valid(line_valid), .line_start(line_start),
-        .line_frac(line_frac), .line_hit(line_hit), .line_vline(line_vline), .line_parity(line_parity),
-        .field_valid(field_valid), .field_hits(field_hits), .field_vsync(field_vsync), .period_out(sync_period),
-        .overrun(sync_overrun)
-    );
+    generate
+        if (WITH_CVBS) begin : g_cvbs
+            cvbs_sync sync (
+                .clk(clk40), .take(sync_take), .step(sync_step), .line_valid(line_valid), .line_start(line_start),
+                .line_frac(line_frac), .line_hit(line_hit), .line_vline(line_vline), .line_parity(line_parity),
+                .field_valid(field_valid), .field_hits(field_hits), .field_vsync(field_vsync), .period_out(sync_period),
+                .overrun(sync_overrun)
+            );
+        end else begin : g_no_cvbs
+            assign {line_valid, line_hit, line_parity, field_valid, field_vsync, sync_overrun} = 6'd0;
+            assign {line_start, sync_period, line_frac, line_vline, field_hits} = 0;
+        end
+    endgenerate
     reg [8:0] last_hits = 0;
     reg last_vsync = 0, fell_behind = 0;
     always @(posedge clk40) begin
@@ -280,7 +318,7 @@ module fm_top #(
     wire [7:0] reg_addr, wr_data;
     wire wr, rd;
     reg [7:0] rd_data;
-    reg [5:0] control = 0;
+    reg [7:0] control = 0;
     reg [87:0] cp_held = 0;
     reg [7:0] cp_decisions_hi = 0;
     reg [13:0] pattern = 0;
@@ -302,7 +340,7 @@ module fm_top #(
             8'h05: rd_data = held;
             8'h06: rd_data = seen_per_ms[7:0];
             8'h07: rd_data = held;
-            8'h08: rd_data = {2'd0, control};
+            8'h08: rd_data = control;
             8'h09: rd_data = pattern[7:0];
             8'h0a: rd_data = {2'd0, pattern[13:8]};
             8'h0b: rd_data = {4'd0, phase40};
@@ -327,6 +365,14 @@ module fm_top #(
             8'h1f: rd_data = cp_decisions_hi;
             8'h20: rd_data = last_hits[7:0];
             8'h21: rd_data = {6'd0, fell_behind, last_vsync};
+            8'h22: rd_data = hz_peak[7:0];
+            8'h23: rd_data = {5'd0, hz_peak[10:8]};
+            8'h24: rd_data = hz_theta[7:0];
+            8'h25: rd_data = hz_theta[15:8];
+            8'h26: rd_data = hz_agc;
+            8'h27: rd_data = hz_symbols[7:0];
+            8'h28: rd_data = {4'd0, hz_symbols[11:8]};
+            8'h29: rd_data = {5'd0, WITH_CVBS != 0, WITH_HDZ != 0, WITH_FM != 0};
             default: rd_data = 8'h00;
         endcase
     end
@@ -336,7 +382,7 @@ module fm_top #(
         if (rd && reg_addr == 8'h06) held <= seen_per_ms[15:8];
         if (rd && reg_addr == 8'h0c) held <= count40_per_ms[15:8];
         if (wr && reg_addr == 8'h0b) phase40 <= wr_data[3:0];
-        if (wr && reg_addr == 8'h08) control <= wr_data[5:0];
+        if (wr && reg_addr == 8'h08) control <= wr_data;
         if (rd && reg_addr == 8'h14) begin
             cp_held <= {cp_decisions[7:0], 5'd0, cp_bin, cp_total, cp_peak};
             cp_decisions_hi <= cp_decisions[15:8];
@@ -351,11 +397,27 @@ module fm_top #(
     // The P4 samples on PCLK's rising edge, the clean clock's falling one, half a period on.
     // Pattern mode wins over FM, which wins over the raw lanes.
     wire own_clock = control[1];
-    wire raw40 = control[4] && !control[0];
-    wire fm = control[2] && !control[0] && !raw40;
-    wire drive = own_clock || fm || raw40 ? en27[1] : en[1];
+    wire hzs = WITH_HDZ && control[6] && !control[0];
+    wire raw40 = control[4] && !control[0] && !hzs;
+    wire fm = WITH_FM && control[2] && !control[0] && !raw40 && !hzs;
+    wire drive = own_clock || fm || raw40 || hzs ? en27[1] : en[1];
     // Raw 40 MS/s: the lanes change on clk40's rise, and the P4 samples on PCLK's, clk40's fall.
-    assign p4_pclk = drive ? (own_clock ? ~half : raw40 ? ~clk40 : fm ? pclk_fm : ~q) : 1'bz;
-    assign p4_d    = drive ? (control[0] ? pattern : raw40 ? lanes40 : fm ? (control[5] ? fm_word : {fm_phase[13:6], fm_radius}) : lanes) : 14'bz;
+    assign p4_pclk = drive ? (own_clock ? ~half : raw40 || hzs ? ~clk40 : fm ? pclk_fm : ~q) : 1'bz;
+    // The 40 MHz words leave from a register, not through the mode mux: the P4 samples half a clk40 later, and
+    // the mux's delay cost spectra grabs repeated words where idle ones belonged.
+    // Control bit 7 sends count x 0x2d5b (mod 2^14), one a clk40, in place of either stream, to measure the link:
+    // the odd factor keeps it invertible and toggles about half the lanes every clock, as spectra do.
+    // Raw and spectra words have each lane's top bit flipped on alternate clocks: switching noise gives the P4 an
+    // extra PCLK edge now and then (0.4% of words doubled, none lost: tools/linktest.py), and with every word
+    // differing from the last the P4 can drop the doubles (iq.c). Flipping only the top bits (+-64) keeps a real
+    // pair of samples from looking like a double, where flipping every bit (x to -x) did 176 times a million.
+    reg [13:0] bus40 = 0, count14 = 0;
+    reg alt = 0;
+    always @(posedge clk40) begin
+        count14 <= count14 + 14'h2d5b;
+        alt <= ~alt;
+        bus40 <= control40[7] ? count14 : (hzs ? {hz_q, hz_i} : lanes40) ^ (alt ? 14'h2040 : 14'h0);
+    end
+    assign p4_d    = drive ? (control[0] ? pattern : hzs || raw40 ? bus40 : fm ? (WITH_CVBS && control[5] ? fm_word : {fm_phase[13:6], fm_radius}) : lanes) : 14'bz;
 
 endmodule

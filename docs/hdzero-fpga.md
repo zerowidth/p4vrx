@@ -2,7 +2,7 @@
 
 Move the HDZero receiver's PHY from the P4 (`hdzrx/`, the C port of hdzrx) into the Nano, model first, each block bit for bit with its model in simulation. Stage A puts the front end in the Nano and sends per-symbol spectra to the P4; stage B adds equalise, demap and descramble so slots go out instead.
 
-Status, 2026-11-18: stage A modelled (`models/hdz_front.py`) and in RTL (`fpga/rtl/hdz_front.v`, `hdz_fft.v`, `hdz_r22.v`), bit for bit with the model in iverilog (`models/hdz_front_check.py`, `models/hdz_fft_check.py`); `fm_top` build 5 puts it on the bus (control bit 6). The C receiver decodes its stream on the Mac and the P4 (`hz_receive_symbols`; `hdz decode src=nano`). Stage B prototyped in C.
+Status, 2026-11-18: stage A modelled (`models/hdz_front.py`) and in RTL (`fpga/rtl/hdz_front.v`, `hdz_fft.v`, `hdz_r22.v`), bit for bit with the model in iverilog (`models/hdz_front_check.py`, `models/hdz_fft_check.py`); `hdz_top` (build 7) is the HDZero image: `fm_top` with the front end in place of FM demod and CVBS sync, which don't fit beside it (50% LUT4, 26% ALU, 58% block RAM, 24 of 48 MULT18; the 40 MHz domain closes at 53.6 MHz). On hardware its stream is well formed in simulation and in structure, but the 40 MHz bus doubles words often enough with spectra that only about 1 symbol in 9 arrives the right length ([the doubled words](experiments/2026-11-18-nano-link-doubles.md)); stage B's slots fit a 13.33 MHz bus, which would end that. The C receiver decodes its stream on the Mac and the P4 (`hz_receive_symbols`; `hdz decode src=nano`). Stage B prototyped in C.
 
 ## Stage A: front end
 

@@ -392,11 +392,19 @@ bool nano_field_vsync(bool *vsync)
     return true;
 }
 
+int nano_features(void)
+{
+    uint8_t id[3], f = 0;
+    if (!s_nano) check_nano();
+    if (!nano_read(REG_ID, id, 3) || id[0] != 'P' || id[1] != 'V') return 0;
+    if (id[2] >= 5) return nano_read(0x29, &f, 1) ? f : 0;
+    /* before the features register: FM from build 2, raw 40 MS/s from 3, CVBS sync from 4 */
+    return (id[2] >= 2 ? NANO_HAS_FM : 0) | (id[2] >= 3 ? NANO_HAS_RAW40 : 0) | (id[2] >= 4 ? NANO_HAS_CVBS : 0);
+}
+
 bool nano_has_fm(void)
 {
-    uint8_t id[3];
-    if (!s_nano) check_nano();
-    return nano_read(REG_ID, id, 3) && id[0] == 'P' && id[1] == 'V' && id[2] >= 2;
+    return nano_features() & NANO_HAS_FM;
 }
 
 bool nano_magnitude(int *magnitude)

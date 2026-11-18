@@ -1927,7 +1927,7 @@ void decode_stop(void)
 static esp_err_t start_bs(void)
 {
     /* Raw lanes unless the Nano demodulates; then it tracks the I/Q offsets itself too. */
-    s_marks = s_fm && s_want_marks && nano_build() >= 4;
+    s_marks = s_fm && s_want_marks && (nano_features() & NANO_HAS_CVBS);
     s_mark_head = s_mark_tail = 0;
     nano_control(s_fm ? NANO_FM | NANO_TRACK_OFFSETS | (s_marks ? NANO_MARKS : 0) : 0);
     if (s_fm) return ESP_OK;
