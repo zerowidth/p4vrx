@@ -2,6 +2,7 @@
  *
  *     hdzrx_host PREFIX OUTDIR [--window N] [--frames N] [--dump all|none|name,name] [--no-conceal]
  *         [--mode NAME] [--ref-runs] [--no-gap] [--force]
+ *         [--words FILE: the Nano's symbol stream, as models/hdz_front.py writes it, instead of the capture]
  *
  * Takes the first N samples (default 1,400,000, what the P4 decodes) after the capture's unsettled ones. */
 #include <stdio.h>
@@ -11,7 +12,7 @@
 
 #include "../hdzrx.h"
 
-static const char *s_out, *s_dump = "all";
+static const char *s_out, *s_dump = "all", *s_words;
 
 static int want(void *ctx, const char *name)
 {
@@ -94,6 +95,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--ref-runs")) o.ref_runs = 1;
         else if (!strcmp(argv[i], "--no-gap")) o.no_gap = 1;
         else if (!strcmp(argv[i], "--force")) o.force = 1;
+        else if (!strcmp(argv[i], "--words") && i + 1 < argc) s_words = argv[++i];
     }
     char path[1024];
     snprintf(path, sizeof path, "%s.json", argv[1]);
@@ -121,7 +123,20 @@ int main(int argc, char **argv)
     fprintf(s_frames, "[");
     hz_info info;
     int64_t t0 = now_us();
-    int frames = hz_receive(raw, n, fs, &o, &info, on_frame, NULL);
+    int frames;
+    if (s_words) {
+        FILE *wf = fopen(s_words, "rb");
+        if (!wf) return perror(s_words), 1;
+        fseek(wf, 0, SEEK_END);
+        size_t nw = ftell(wf) / 2;
+        fseek(wf, 0, SEEK_SET);
+        uint16_t *words = malloc(nw * 2);
+        nw = fread(words, 2, nw, wf);
+        fclose(wf);
+        frames = hz_receive_symbols(words, nw, &o, &info, on_frame, NULL);
+    } else {
+        frames = hz_receive(raw, n, fs, &o, &info, on_frame, NULL);
+    }
     int64_t total_us = now_us() - t0;
     fprintf(s_frames, "]\n");
     fclose(s_frames);

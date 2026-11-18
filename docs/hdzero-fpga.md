@@ -1,0 +1,59 @@
+# HDZero PHY in the Nano
+
+Move the HDZero receiver's PHY from the P4 (`hdzrx/`, the C port of hdzrx) into the Nano, model first, each block bit for bit with its model in simulation. Stage A puts the front end in the Nano and sends per-symbol spectra to the P4; stage B adds equalise, demap and descramble so slots go out instead.
+
+Status, 2026-11-18: stage A modelled (`models/hdz_front.py`), and the C receiver decodes its output (`hz_receive_symbols`, `hdzrx_host --words`). No RTL yet.
+
+## Stage A: front end
+
+All on the 40 MHz clock, one 40 MS/s I/Q sample a clock from the raw lanes; 27 MS/s parts run on a clock enable.
+
+1. DC: each sample less the mean of the 2,048 around it, as hdzrx's local mean; a 1,024-sample delay makes it causal. 9-bit out.
+2. Resample 40 to 27 MS/s: a polyphase FIR of 8 taps and 27 phases (output m from inputs around 40m/27, phase (40m) mod 27), 9-bit coefficients, each phase summing to 256. Kaiser-windowed sinc, cutoff 12.5 MHz. 16 MULT9.
+3. CP timing: y[n-1024] conj(y[n]) on 8-bit samples, summed over 32, magnitude as max + min/2, folded over 1,056 positions for 64 symbols (2.5 ms). The peak sets the symbol start. Corrections of 16 samples or less move the next symbol's window; larger ones resync.
+4. Fractional CFO: the block after a peak sums the correlation at the peak, a CORDIC gives its angle in 2^-16 turns, and the NCO steps that over 1,024 samples. Whole bins are left to the receiver, as an index shift.
+5. NCO: a 32-bit phase accumulator through a 1,024-entry, 12-bit sin/cos table.
+6. FFT: 1,024 points, radix-2² decimation in frequency (the R2²SDF's arithmetic), 18-bit, each of the ten butterflies halving, Q15 twiddles with rounding. The window starts 8 samples into the CP. Bins come out bit-reversed.
+7. Output scaling: bin k times G[k] A >> 13, G a per-bin gain table (Q4, `fpga/rtl/hdz_gain_c5narrow.hex`, measured through the C5's 802.11p filter, up to 8×) that lifts the band edges before quantising, A an AGC (Q5) that brings the mean |v| to 14 over each 64 symbols. Saturated to ±63.
+
+### Bus format
+
+16-bit words on the raw I/Q bus (PCLK 40 MHz), each lane value v a 7-bit byte read as 2v+1 by the P4, as raw I/Q. A bin never takes v = -64, so:
+
+- (-64, -64) starts a symbol. Then three header words, each 14 bits as two 7-bit values (I bits 0-6, Q bits 7-13): {cfo_valid, resync, symbol count (12 bits)}; the window's offset in samples from where it would be without timing corrections since the last resync (signed), whose phase ramp across the bins the receiver turns back out; the AGC's A, which the receiver divides back out.
+- Then 1,024 bins in bit-reversed order.
+- (-64, 0) is idle.
+
+1,028 words a symbol at 25.6k symbols a second is 26.3M words a second, 66% of the bus.
+
+## Results of the model
+
+The C receiver on the model's stream against it on the samples (float front end), first 4M samples of each Nov 4 capture, decision error (median squared distance to the nearest 16-QAM point) on bins |k| < 300 and 300-444:
+
+| Capture | Float front end | Model front end |
+| --- | --- | --- |
+| 191225 | -20.0 to -20.4 dB, -15.7 to -17.5 dB (one frame -17.5/-13.5) | -19.0 to -19.8 dB, -14.3 to -16.0 dB (one frame -15.9/-12.1) |
+| 191250 | -15.7 to -18.2 dB, -11.1 to -14.0 dB | -15.6 to -17.8 dB, -11.0 to -13.8 dB |
+
+- Every frame of 191206, 191225 and 191250 finds its three special symbols. 191237 is weak in both (hdzrx finds 0-2 specials a frame there).
+- The fixed-point FFT is within 0.13% of a float FFT; swapping in a float FFT or scipy's resampler changes nothing measurable, and moving the window (8, 4, 0, -4 samples back) shows 8 is best. The remaining 0.2-1 dB is in the timing and CFO tracking or the 7-bit output, not found yet.
+- Without the gain table, the outer bins lost 4-6 dB to quantisation (their level is 15-20 dB down). Without the AGC, a fixed scale clipped 28-53% of bins on the louder captures.
+- A timing correction of one sample is a full turn of phase ramp across the band, which broke the training runs (one run lost, read as 1080p30) until the header carried the offset for the receiver to undo.
+- Slots agree with the float decode on 80-95% of non-noisy slots per frame; agreement says which differ, decision error says which is better.
+
+## Resources, estimated
+
+| Block | MULT9 | MULT18 | Block RAM |
+| --- | --- | --- | --- |
+| DC | | | 1 |
+| Resample | 16 | | 1 (coefficients) |
+| CP correlator, fold | 4 | | 3 |
+| NCO | | 4 | 2 |
+| FFT | | 12-16 | 7 (delays 512, 256, 128; twiddles) |
+| Output scale, AGC | 1 | 2 | 1 (gain table) |
+
+About 16.5 DSP macros with `fm_top`'s 6.5 makes 23 of 24, which is tight; synthesis will tell. The FFT can use the three-multiplier complex product.
+
+## Stage B, next
+
+Equalise, demap and descramble in the Nano need the frame's training run (channel), per-symbol pilots (common phase and slope) and a per-bin trim. hdzrx's trim uses the whole frame's data (409 symbols) before deciding any bit, which a streaming design can't hold; the plan is to try the previous frame's trim in the C receiver first, then port.

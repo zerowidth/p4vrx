@@ -28,6 +28,7 @@ static const float A = 0.44721359549995793f; /* 1/sqrt(5): 16-QAM levels at unit
 
 static uint8_t SCR_HP[2 * 824], SCR_LP[2 * 824];
 static float RS_H[2 * RS_HALF + 1];
+static uint16_t s_bitrev[HZ_N];
 
 typedef struct {
     const hz_opts *o;
@@ -37,6 +38,12 @@ typedef struct {
     int start;
     double cfo;
     hz_cf rot[HZ_N];
+    /* Spectra from the Nano instead of samples: each symbol's 1,024 words in bit-reversed order, and a whole-bin
+     * shift found here. */
+    const uint16_t *words;
+    const int *sym_off;
+    int nsym_words;
+    int kshift;
 } rx_t;
 
 /* Tables and scratch, about 150 KB, allocated for each burst and freed after it, so internal RAM is only taken
@@ -108,6 +115,11 @@ static void init(void)
         float f = (float)(k - CONT[p]) / (CONT[p + 1] - CONT[p]);
         W->interp_p[i] = (uint8_t)p;
         W->interp_f[i] = f < 0 ? 0 : f > 1 ? 1 : f;
+    }
+    for (int i = 0; i < HZ_N; ++i) {
+        int v = 0;
+        for (int b = 0; b < 10; ++b) v |= ((i >> b) & 1) << (9 - b);
+        s_bitrev[i] = (uint16_t)v;
     }
     for (int i = 0; i <= EXPJ_N; ++i) W->expj[i] = (float)cos(2 * M_PI * i / EXPJ_N) + I * (float)sin(2 * M_PI * i / EXPJ_N);
     for (int i = 0; i < HZ_N; ++i) W->back[i] = (float)cos(2 * M_PI * (i - 512) * FFT_BACK / HZ_N) + I * (float)sin(2 * M_PI * (i - 512) * FFT_BACK / HZ_N);
@@ -230,8 +242,31 @@ static void set_cfo(rx_t *r, double cfo)
 }
 
 /* Symbol k's spectrum, fftshifted (index b + 512 is bin b), as hdzrx's fft_symbols. */
+/* A bus word's 7-bit lane value: the byte is 2v+1. */
+static float lane_v(uint8_t b) { return (float)(((int8_t)b - 1) >> 1); }
+
+static void symbol_words(const rx_t *r, int k, hz_cf *out)
+{
+    const uint16_t *w = r->words + r->sym_off[k];
+    /* the window's offset from its timing corrections: a phase ramp across the bins, turned back out */
+    int lo = (int)lane_v(w[-2] & 0xff) & 0x7f, hi = (int)lane_v(w[-2] >> 8) & 0x7f;
+    int off = (lo | hi << 7) << 18 >> 18;
+    int agc = ((int)lane_v(w[-1] & 0xff) & 0x7f) | ((int)lane_v(w[-1] >> 8) & 0x7f) << 7;
+    float scale = 32.0f / (agc ? agc : 32);
+    for (int i = 0; i < HZ_N; ++i) {
+        int bin = (i + 512 + r->kshift) & (HZ_N - 1);
+        uint16_t v = w[s_bitrev[bin]];
+        hz_cf ramp = W->expj[(-bin * off * (EXPJ_N / HZ_N)) & (EXPJ_N - 1)];
+        out[i] = (lane_v(v & 0xff) + I * lane_v(v >> 8)) * (W->back[i] * ramp * scale);
+    }
+}
+
 static void symbol(const rx_t *r, int k, hz_cf *out)
 {
+    if (r->words) {
+        symbol_words(r, k, out);
+        return;
+    }
     hz_cf *buf = W->buf;
     if (k % 16 == 0) yield(r);
     int s = r->start + k * HZ_SYM + HZ_CP - FFT_BACK;
@@ -247,7 +282,7 @@ static void symbol(const rx_t *r, int k, hz_cf *out)
 static void whole_bin_cfo(rx_t *r)
 {
     int L = r->L < 400 * HZ_SYM ? r->L : 400 * HZ_SYM;
-    int nsym = (L - r->start) / HZ_SYM - 1;
+    int nsym = r->words ? (r->nsym_words < 398 ? r->nsym_words : 398) : (L - r->start) / HZ_SYM - 1;
     hz_cf *cur = W->cur, *prev = W->prev;
     hz_cf acc[7] = {0};
     for (int t = 0; t < nsym; ++t) {
@@ -261,13 +296,14 @@ static void whole_bin_cfo(rx_t *r)
     for (int k = 1; k < 7; ++k)
         if (cabsf(acc[k]) > cabsf(acc[best])) best = k;
     r->info->whole_bins = best - 3;
-    set_cfo(r, r->cfo + (best - 3) * HZ_FS / HZ_N);
+    if (r->words) r->kshift = best - 3, r->cfo = (best - 3) * HZ_FS / HZ_N;
+    else set_cfo(r, r->cfo + (best - 3) * HZ_FS / HZ_N);
 }
 
 /* Section 13.3: runs of coherent T symbols, each as (first symbol, first symbol after). */
 static void training_runs(rx_t *r)
 {
-    int nsym = (r->L - r->start) / HZ_SYM - 1;
+    int nsym = r->words ? r->nsym_words : (r->L - r->start) / HZ_SYM - 1;
     r->info->nsym = nsym;
     hz_cf *cur = W->cur, *prev = W->prev;
     float *cs = calloc(nsym > 1 ? nsym : 1, sizeof(float));
@@ -689,31 +725,9 @@ out:
     return ret;
 }
 
-int hz_receive(const uint16_t *raw, size_t n, double fs_in, const hz_opts *o, hz_info *info, hz_frame_cb cb, void *ctx)
+static int back_end(rx_t *rp, const hz_opts *o, hz_info *info, hz_frame_cb cb, void *ctx, int gate)
 {
-    W = o->alloc_fast ? o->alloc_fast(sizeof *W) : NULL;
-    if (!W) W = o->alloc ? o->alloc(sizeof *W) : malloc(sizeof *W);
-    if (!W) return -1;
-    init();
-    rx_t *rp = &W->r;
-    memset(rp, 0, sizeof *rp);
-    memset(info, 0, sizeof *info);
-    rp->o = o, rp->info = info;
-    (void)fs_in; /* 40 MS/s only, as the resampler's 27/40 */
     int64_t t0 = now(rp);
-    if (resample(rp, raw, (int)n)) {
-        xfree(rp, W);
-        W = NULL;
-        return -1;
-    }
-    info->us[HZ_T_RESAMPLE] = now(rp) - t0;
-    dump(rp, "y", rp->y, (size_t)rp->L * sizeof(hz_cf));
-    t0 = now(rp);
-    cp_sync(rp);
-    set_cfo(rp, rp->cfo);
-    info->start = rp->start;
-    info->us[HZ_T_SYNC] = now(rp) - t0;
-    t0 = now(rp);
     whole_bin_cfo(rp);
     info->cfo_hz = rp->cfo;
     info->us[HZ_T_WHOLE_BIN] = now(rp) - t0;
@@ -721,7 +735,7 @@ int hz_receive(const uint16_t *raw, size_t n, double fs_in, const hz_opts *o, hz
     training_runs(rp);
     info->us[HZ_T_RUNS] = now(rp) - t0;
     int frames = 0, max = o->max_frames > 0 ? o->max_frames : 99;
-    if (info->cp_ratio < HZ_MIN_CP && !o->force) max = 0;
+    if (gate && !o->force) max = 0;
     for (int i = 0; i < info->nruns && frames < max; ++i) {
         int a = info->runs[i][0], b = info->runs[i][1];
         int nxt = i + 1 < info->nruns ? info->runs[i + 1][0] : -1;
@@ -735,8 +749,97 @@ int hz_receive(const uint16_t *raw, size_t n, double fs_in, const hz_opts *o, hz
         ++frames;
     }
     info->frames = frames;
-    if (rp->y != o->y_buf) xfree(rp, rp->y);
+    return frames;
+}
+
+static rx_t *begin(const hz_opts *o, hz_info *info)
+{
+    W = o->alloc_fast ? o->alloc_fast(sizeof *W) : NULL;
+    if (!W) W = o->alloc ? o->alloc(sizeof *W) : malloc(sizeof *W);
+    if (!W) return NULL;
+    init();
+    rx_t *rp = &W->r;
+    memset(rp, 0, sizeof *rp);
+    memset(info, 0, sizeof *info);
+    rp->o = o, rp->info = info;
+    return rp;
+}
+
+static void end(rx_t *rp)
+{
     xfree(rp, W);
     W = NULL;
+}
+
+int hz_receive(const uint16_t *raw, size_t n, double fs_in, const hz_opts *o, hz_info *info, hz_frame_cb cb, void *ctx)
+{
+    rx_t *rp = begin(o, info);
+    if (!rp) return -1;
+    (void)fs_in; /* 40 MS/s only, as the resampler's 27/40 */
+    int64_t t0 = now(rp);
+    if (resample(rp, raw, (int)n)) {
+        end(rp);
+        return -1;
+    }
+    info->us[HZ_T_RESAMPLE] = now(rp) - t0;
+    dump(rp, "y", rp->y, (size_t)rp->L * sizeof(hz_cf));
+    t0 = now(rp);
+    cp_sync(rp);
+    set_cfo(rp, rp->cfo);
+    info->start = rp->start;
+    info->us[HZ_T_SYNC] = now(rp) - t0;
+    int frames = back_end(rp, o, info, cb, ctx, info->cp_ratio < HZ_MIN_CP);
+    if (rp->y != o->y_buf) xfree(rp, rp->y);
+    end(rp);
+    return frames;
+}
+
+/* The Nano's symbol stream (models/hdz_front.py's format): a (-64, -64) word, a header word {cfo_valid, resync,
+ * count}, the window's offset, the AGC's gain, then 1,024 bins in bit-reversed order; (-64, 0) is idle. Returns the longest run of consecutive symbols
+ * with the CFO settled and no resync inside, as word offsets. */
+int hz_symbol_run(const uint16_t *w, size_t n, int *off, int max, int *first_count)
+{
+    int best_start = 0, best_len = 0, cur_start = 0, cur_len = 0, prev = -2, nsym = 0;
+    for (size_t i = 0; i + 4 + HZ_N <= n && nsym < max;) {
+        if (w[i] != 0x8181) {
+            ++i;
+            continue;
+        }
+        uint16_t h = w[i + 1];
+        int lo = (int)((int8_t)(h & 0xff) - 1) / 2 & 0x7f, hi = (int)((int8_t)(h >> 8) - 1) / 2 & 0x7f;
+        int hdr = lo | hi << 7, count = hdr & 0xfff, resync = hdr >> 12 & 1, cfo_ok = hdr >> 13 & 1;
+        if (!cfo_ok || resync || count != ((prev + 1) & 0xfff)) {
+            if (cur_len > best_len) best_len = cur_len, best_start = cur_start;
+            cur_start = nsym, cur_len = 0;
+        }
+        off[nsym++] = (int)(i + 4);
+        if (cfo_ok) ++cur_len;
+        else cur_start = nsym;
+        prev = count;
+        i += 4 + HZ_N;
+    }
+    if (cur_len > best_len) best_len = cur_len, best_start = cur_start;
+    if (first_count) *first_count = best_start;
+    memmove(off, off + best_start, best_len * sizeof(int));
+    return best_len;
+}
+
+int hz_receive_symbols(const uint16_t *w, size_t n, const hz_opts *o, hz_info *info, hz_frame_cb cb, void *ctx)
+{
+    rx_t *rp = begin(o, info);
+    if (!rp) return -1;
+    int max = (int)(n / (HZ_N + 4)) + 1, first = 0;
+    int *off = malloc(max * sizeof(int));
+    if (!off) {
+        end(rp);
+        return -1;
+    }
+    rp->words = w;
+    rp->sym_off = off;
+    rp->nsym_words = hz_symbol_run(w, n, off, max, &first);
+    info->start = first;
+    int frames = back_end(rp, o, info, cb, ctx, 0);
+    free(off);
+    end(rp);
     return frames;
 }
