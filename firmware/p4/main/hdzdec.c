@@ -91,7 +91,7 @@ static void on_frame(void *ctx, const hz_frame *f)
 }
 
 static char s_mode[16];
-static int s_ref_runs, s_no_gap, s_force;
+static int s_ref_runs, s_no_gap, s_force, s_words;
 
 static void run(int frames, size_t window, int conceal)
 {
@@ -113,7 +113,8 @@ static void run(int frames, size_t window, int conceal)
     int64_t t0 = esp_timer_get_time();
     iq_pause_decoder();
     iq_buffer_hold(true);
-    int got = hz_receive(raw, n, 40e6, &o, &info, on_frame, NULL);
+    /* words: the Nano's per-symbol spectra (NANO_HDZ) rather than raw I/Q */
+    int got = s_words ? hz_receive_symbols(raw, n, &o, &info, on_frame, NULL) : hz_receive(raw, n, 40e6, &o, &info, on_frame, NULL);
     iq_buffer_hold(false);
     iq_resume_decoder();
     int64_t total = esp_timer_get_time() - t0;
@@ -169,7 +170,7 @@ static void upload(size_t n)
 }
 
 /* hdz upload N | hdz run [frames=N] [window=N] [conceal=0|1] [dump=all|a,b] [show=0|1]
- * [mode=720p60|540p90|1080p30|960x720p60, else detected] [runs=hdzrx|ref] [gap=0|1] [force=1: decode under CP 1.8x] | hdz decode [samples] [same
+ * [mode=720p60|540p90|1080p30|960x720p60, else detected] [runs=hdzrx|ref] [gap=0|1] [force=1: decode under CP 1.8x] [src=nano: the buffer holds the Nano's spectra] | hdz decode [samples] [same
  * options, and wide=1 for the C5's wide filter] | hdz show off. The first frame stays on the LCD until hdz show off. */
 bool hdzdec_command(int argc, char **argv)
 {
@@ -190,7 +191,7 @@ bool hdzdec_command(int argc, char **argv)
     s_dump = "";
     s_show = true;
     s_mode[0] = 0;
-    s_ref_runs = s_no_gap = s_force = 0;
+    s_ref_runs = s_no_gap = s_force = s_words = 0;
     for (int i = first; i < argc; ++i) {
         if (!strncmp(argv[i], "frames=", 7)) frames = atoi(argv[i] + 7);
         else if (!strncmp(argv[i], "window=", 7)) window = strtoul(argv[i] + 7, NULL, 10);
@@ -202,13 +203,14 @@ bool hdzdec_command(int argc, char **argv)
         else if (!strncmp(argv[i], "runs=", 5)) s_ref_runs = !strcmp(argv[i] + 5, "ref");
         else if (!strncmp(argv[i], "gap=", 4)) s_no_gap = !atoi(argv[i] + 4);
         else if (!strncmp(argv[i], "force=", 6)) s_force = atoi(argv[i] + 6);
+        else if (!strncmp(argv[i], "src=", 4)) s_words = !strcmp(argv[i] + 4, "nano");
     }
     if (strcmp(sub, "decode")) {
         run(frames, window, conceal);
         return true;
     }
     /* Analog decoding is noise while HDZero is on air, and sharing the cores doubles the burst's time. */
-    if (iq_grab((int)grab, wide, true)) run(frames, window, conceal);
+    if (iq_grab((int)grab, wide && !s_words, true, s_words)) run(frames, window, conceal);
     iq_resume_decoder();
     return true;
 }

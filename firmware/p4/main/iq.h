@@ -13,8 +13,9 @@ void iq_command(int argc, char **argv);
 const uint16_t *iq_samples(size_t *count);
 /* Raw 40 MS/s I/Q from the Nano into the capture buffer, pausing the decoder; prints `ok grab ...`. wide turns the
  * C5's 802.11p setting off for the grab, about twice the receive filter's width. hold keeps the decoder paused
- * afterwards, until `iq resume`. */
-bool iq_grab(int n, bool wide, bool hold);
+ * afterwards, until `iq resume`. spectra takes the Nano's HDZero front end's words (fm_top build 5) instead of raw
+ * I/Q. */
+bool iq_grab(int n, bool wide, bool hold, bool spectra);
 /* The capture buffer, for samples uploaded from the host, and its size; iq_set_samples marks n of them as the last
  * capture. */
 uint16_t *iq_buffer(size_t *bytes);

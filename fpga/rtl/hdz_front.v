@@ -50,7 +50,7 @@ module hdz_front (
 
     // ---- Resample 40 -> 27 MS/s: output m from xd[i0-3 .. i0+4], i0 = floor(40m/27), phase (40m) mod 27
     reg [71:0] coef [0:26];
-    initial $readmemh("hdz_resample.hex", coef);
+    initial $readmemh("fpga/rtl/hdz_resample.hex", coef);
     reg signed [8:0] sr_i [0:7], sr_q [0:7];
     integer k;
     integer ki;
@@ -253,7 +253,7 @@ module hdz_front (
     reg ph_ok = 0;
     wire [10:0] phase_eff = ph_take ? ph_val : phase;
     reg [23:0] lut [0:1023];
-    initial $readmemh("hdz_nco.hex", lut);
+    initial $readmemh("fpga/rtl/hdz_nco.hex", lut);
     reg [23:0] lut_q = 0;
     always @(posedge clk) lut_q <= lut[nco[31:22]];
     reg z1_v = 0;
@@ -328,7 +328,7 @@ module hdz_front (
 
     // ---- Output scale: bin x G[k] A >> 13 (G per bin, Q4; A the AGC, Q5), saturated to +-63
     reg [7:0] gain [0:1023];
-    initial $readmemh("hdz_gain_c5narrow.hex", gain);
+    initial $readmemh("fpga/rtl/hdz_gain_c5narrow.hex", gain);
     function [9:0] bitrev(input [9:0] p);
         integer b;
         for (b = 0; b < 10; b = b + 1) bitrev[b] = p[9 - b];

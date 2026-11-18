@@ -30,7 +30,8 @@ def main(nsym=6):
                 for a, b in zip(re[s], im[s]):
                     f.write(f"{a} {b}\n")
         for t in ("hdz_tw1024.hex", "hdz_tw256.hex", "hdz_tw64.hex", "hdz_tw16.hex"):
-            os.symlink(os.path.join(ROOT, "fpga/rtl", t), os.path.join(d, t))
+            os.makedirs(os.path.join(d, "fpga/rtl"), exist_ok=True)
+            os.symlink(os.path.join(ROOT, "fpga/rtl", t), os.path.join(d, "fpga/rtl", t))
         src = [os.path.join(ROOT, p) for p in ("fpga/sim/hdz_fft_tb.v", "fpga/rtl/hdz_fft.v", "fpga/rtl/hdz_r22.v",
                                                "fpga/rtl/ce_ring.v")]
         subprocess.run(["iverilog", "-g2012", "-o", os.path.join(d, "tb")] + src, check=True)

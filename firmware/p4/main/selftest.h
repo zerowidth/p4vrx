@@ -18,6 +18,8 @@ void nano_command(int argc, char **argv);
 #define NANO_TRACK_OFFSETS 8
 #define NANO_RAW40 16
 #define NANO_MARKS 32
+/* HDZero spectra on the bus (fm_top build 5): docs/hdzero-fpga.md. */
+#define NANO_HDZ 64
 bool nano_control(uint8_t control);
 /* fm_top's mean CORDIC magnitude over the last 32768 samples. */
 bool nano_magnitude(int *magnitude);

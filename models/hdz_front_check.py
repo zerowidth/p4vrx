@@ -26,7 +26,8 @@ def main(prefix, samples=400_000):
         with open(os.path.join(d, "hdz_front_in.txt"), "w") as f:
             f.write("".join(f"{v:04x}\n" for v in raw))
         for t in TABLES:
-            os.symlink(os.path.join(ROOT, "fpga/rtl", t), os.path.join(d, t))
+            os.makedirs(os.path.join(d, "fpga/rtl"), exist_ok=True)
+            os.symlink(os.path.join(ROOT, "fpga/rtl", t), os.path.join(d, "fpga/rtl", t))
         subprocess.run(["iverilog", "-g2012", "-o", os.path.join(d, "tb"), os.path.join(ROOT, "fpga/sim/hdz_front_tb.v")]
                        + [os.path.join(ROOT, p) for p in RTL], check=True)
         r = subprocess.run(["vvp", "-n", "tb"], cwd=d, check=True, capture_output=True, text=True)

@@ -6,7 +6,7 @@ module hdz_r22 #(
     parameter L = 1024,
     parameter LB = 10,
     parameter TWIDDLE = 1,
-    parameter TWFILE = "hdz_tw1024.hex"
+    parameter TWFILE = "fpga/rtl/hdz_tw1024.hex"
 ) (
     input  wire               clk,
     input  wire               ce,

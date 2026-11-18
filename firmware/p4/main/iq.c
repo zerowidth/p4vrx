@@ -778,7 +778,7 @@ void iq_resume_decoder(void)
     s_held = false;
 }
 
-bool iq_grab(int n, bool wide, bool hold)
+bool iq_grab(int n, bool wide, bool hold, bool spectra)
 {
     if (n <= 0 || n > MAX_SAMPLES) n = CAPTURE_SAMPLES;
     if (!nano_has_fm()) {
@@ -791,7 +791,7 @@ bool iq_grab(int n, bool wide, bool hold)
     int64_t t0 = esp_timer_get_time();
     bool was = decode_rx_pause();
     int every = s_every;
-    nano_control(NANO_RAW40);
+    nano_control(spectra ? NANO_HDZ : NANO_RAW40);
     s_every = 2;
     bus_enable(true);
     char reply[48] = "", back[48] = "";
@@ -812,9 +812,9 @@ bool iq_grab(int n, bool wide, bool hold)
     unsigned mhz;
     const char *ch = iq_channel(&mhz);
     if (err != ESP_OK) say("err grab: %s\n", esp_err_to_name(err));
-    else say("ok grab samples=%d rate=40000000 ch=%s mhz=%u gain=%d hdzero=%d score=%.2f filter=%s%s%s crc=%08lx%s paused_ms=%lld\n", n,
+    else say("ok grab samples=%d rate=40000000 ch=%s mhz=%u gain=%d hdzero=%d score=%.2f filter=%s%s%s crc=%08lx%s%s paused_ms=%lld\n", n,
              ch, mhz, decode_gain(), hdz, (double)score, wide ? "wide" : "narrow", wide ? " c5=" : "", wide ? reply : "",
-             (unsigned long)crc, s_held ? " held=1" : "", (esp_timer_get_time() - t0) / 1000);
+             (unsigned long)crc, s_held ? " held=1" : "", spectra ? " data=spectra" : "", (esp_timer_get_time() - t0) / 1000);
     return err == ESP_OK;
 }
 
@@ -837,13 +837,14 @@ void iq_command(int argc, char **argv)
     const char *sub = argc > 1 ? argv[1] : "";
     /* The decoder owns the one PARLIO RX unit while it runs. */
     if (strcmp(sub, "grab") == 0) {
-        bool wide = false, hold = false;
+        bool wide = false, hold = false, spectra = false;
         for (int k = 3; k < argc; ++k) {
             if (strcmp(argv[k], "wide") == 0) wide = true;
             else if (strcmp(argv[k], "hold") == 0) hold = true;
+            else if (strcmp(argv[k], "spectra") == 0) spectra = true;
             else if (atoi(argv[k]) > 0) s_wide_settle_ms = atoi(argv[k]);
         }
-        iq_grab(argc > 2 ? atoi(argv[2]) : 0, wide, hold);
+        iq_grab(argc > 2 ? atoi(argv[2]) : 0, wide, hold, spectra);
         return;
     }
     if (strcmp(sub, "resume") == 0) {

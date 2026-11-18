@@ -26,12 +26,16 @@ HERE = pathlib.Path(__file__).resolve().parent.parent
 WINDOW = 1_400_000
 
 
-def upload(con, prefix):
-    meta = json.load(open(prefix + ".json"))
-    w = np.fromfile(prefix + ".bin", dtype="<u2")
-    if len(w) > 1_400_000:
-        w = w[meta.get("unsettled_leading_samples", 0):]
-    w = w[:WINDOW]
+def upload(con, prefix, words=None):
+    """A capture's first WINDOW samples after its unsettled ones, or a file of the Nano's spectra words as it is."""
+    if words is not None:
+        w = np.fromfile(words, dtype="<u2")[:WINDOW]
+    else:
+        meta = json.load(open(prefix + ".json"))
+        w = np.fromfile(prefix + ".bin", dtype="<u2")
+        if len(w) > 1_400_000:
+            w = w[meta.get("unsettled_leading_samples", 0):]
+        w = w[:WINDOW]
     con.s.write(f"hdz upload {len(w)}\r".encode())
     ready = con.lines(time.time() + 3, rb"^(ok upload ready|err)")
     if not ready or not ready[-1].startswith(b"ok upload ready"):
@@ -50,8 +54,9 @@ def upload(con, prefix):
     con.lines(time.time() + 0.3, rb"^> ?$")
 
 
-def run(con, out, frames, dumps):
-    con.s.write(f"hdz run frames={frames} dump={','.join(dumps)}\r".encode())
+def run(con, out, frames, dumps, extra=""):
+    # options before the dump list: the console keeps 127 characters a line
+    con.s.write(f"hdz run frames={frames}{extra} dump={','.join(dumps)}"[:127].encode() + b"\r")
     end = time.time() + 120
     buf, name, size, body, frames_json, info = b"", None, 0, [], [], None
     while time.time() < end:
@@ -110,9 +115,24 @@ def main():
     ap.add_argument("--frames", type=int, default=1)
     ap.add_argument("--full", action="store_true")
     ap.add_argument("--no-compare", action="store_true")
+    ap.add_argument("--words", help="a file of the Nano's spectra words (models/hdz_front.py's output) to upload and "
+                                    "decode with src=nano, instead of a capture")
+    ap.add_argument("--nano", action="store_true", help="with --grab: grab the Nano's spectra (fm_top build 5)")
     a = ap.parse_args()
     con = Console()
-    if a.grab:
+    extra = ""
+    if a.words:
+        upload(con, None, a.words)
+        prefix = str(pathlib.Path(a.words).resolve().with_suffix(""))
+        extra = " src=nano"
+        a.no_compare = True
+    elif a.grab and a.nano:
+        reply = [l for l in con.cmd(f"iq grab {a.samples} spectra hold", 15) if l.startswith(("ok grab", "err"))]
+        print(reply, flush=True)
+        prefix = str(HERE / "captures/hdz" / time.strftime("spectra-%Y%m%d-%H%M%S"))
+        extra = " src=nano"
+        a.no_compare = True
+    elif a.grab:
         prefix = watch_grab(con, a.samples, HERE / "captures/hdz", "hdzrun")
         if not prefix:
             sys.exit(1)
@@ -125,7 +145,9 @@ def main():
     dumps = [f"f{i}.{n}" for i in range(a.frames) for n in ("H", "trim", "slots", "Y", "Cb", "Cr")]
     if a.full:
         dumps += ["y"] + [f"f{i}.E" for i in range(a.frames)]
-    info = run(con, out, a.frames, dumps)
+    info = run(con, out, a.frames, dumps, extra)
+    if a.grab and a.nano:
+        con.cmd("iq resume", 2)
     frames = json.loads((out / "frames.json").read_text()) if (out / "frames.json").exists() else []
     for fi, fr in enumerate(frames):
         save_png(out, fi, fr)
