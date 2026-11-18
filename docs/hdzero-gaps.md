@@ -2,7 +2,7 @@
 
 Where hdzrx (`hdzero-captures/hdzrx/`) differs from hdzero-reference (`SPEC.md`, `hdzero_ref/`) for 720p60, checked on C5 captures 191206 and 191225 (scripts and logs in `/private/tmp/claude-501/gapcheck/`).
 
-The C port (`hdzrx/`, [decoder](hdzero-decoder.md)) recomputes its CP sums directly every 1,024 samples, so it doesn't have the float32 failure; on the first 1.4M samples of 191206 it and hdzrx both find start 509 and specials [31, 181, 340]. The other rows apply to it as to hdzrx.
+The C port (`hdzrx/`, [decoder](hdzero-decoder.md)) recomputes its CP sums directly every 1,024 samples, so it doesn't have the float32 failure; on the first 1.4M samples of 191206 it and hdzrx both find start 509 and specials [31, 181, 340]. The other rows apply to it as to hdzrx. The C5's band edge is its 802.11p setting; grabs can now turn it off ([the filter test](experiments/2026-11-18-c5-wide-filter.md)).
 
 | Area | hdzrx | Reference | Impact |
 |---|---|---|---|

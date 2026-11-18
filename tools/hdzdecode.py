@@ -5,6 +5,7 @@ carrier offset, frames, special symbols found, records concealed. Frames go to P
     uv run python tools/hdzdecode.py captures/hdz          (every capture in the folder not decoded yet)
 
 HDZERO_CAPTURES points at the hdzero-captures checkout (default ../hdzero-captures beside this repo)."""
+import json
 import os
 import pathlib
 import re
@@ -31,8 +32,13 @@ def decode(prefix):
         print(f"{prefix}: no sync ({log.strip().splitlines()[-1] if log.strip() else 'no output'})", flush=True)
         return
     with_specials = sum(1 for s, _, _ in frames if s.strip())
+    try:
+        filt = json.load(open(f"{prefix}.json")).get("filter", "narrow")
+    except (OSError, ValueError):
+        filt = "?"
+
     concealed = sorted(int(c) for _, _, c in frames)
-    print(f"{prefix}: CP {float(head.group(1)):.1f}x, CFO {int(head.group(2)) / 1e3:.1f} kHz, {len(frames)} frames, "
+    print(f"{prefix}: {filt} filter, CP {float(head.group(1)):.1f}x, CFO {int(head.group(2)) / 1e3:.1f} kHz, {len(frames)} frames, "
           f"{with_specials} with special symbols, concealed median {concealed[len(concealed) // 2] if concealed else '-'}"
           f" -> {out}/", flush=True)
 

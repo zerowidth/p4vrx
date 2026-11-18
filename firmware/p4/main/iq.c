@@ -734,7 +734,10 @@ static void rate_test(int argc, char **argv)
 
 /* Raw 40 MS/s I/Q from the Nano's PLL samples, with the C5 left as it is and decoding paused only for the capture;
  * `iq dump` sends it. */
-bool iq_grab(int n)
+/* The settle after switching the C5's filter, in ms; `iq grab N wide MS` overrides it for measuring. */
+static int s_wide_settle_ms = 20;
+
+bool iq_grab(int n, bool wide)
 {
     if (n <= 0 || n > MAX_SAMPLES) n = CAPTURE_SAMPLES;
     if (!nano_has_fm()) {
@@ -750,15 +753,23 @@ bool iq_grab(int n)
     nano_control(NANO_RAW40);
     s_every = 2;
     bus_enable(true);
+    char reply[48] = "", back[48] = "";
+    /* 802.11p off widens the receive filter for HDZero's band edges; analog decodes badly with it, so only for the grab. */
+    /* The C5's UART loses characters beside a running bus, so each switch gets three tries. */
+    for (int k = 0; wide && k < 3 && !c5_request("11p 0", reply, sizeof reply, 300); ++k) {}
+    if (wide) vTaskDelay(pdMS_TO_TICKS(s_wide_settle_ms));
     esp_err_t err = capture(s_psram, n, PARLIO_SAMPLE_EDGE_POS);
+    bool restored = !wide;
+    for (int k = 0; !restored && k < 3; ++k) restored = c5_request("11p 1", back, sizeof back, 300);
+    if (!restored) say("iq grab: C5 kept its wide filter (%s)\n", back);
     s_every = every;
     nano_control(0);
     if (was) decode_rx_resume();
     unsigned mhz;
     const char *ch = iq_channel(&mhz);
     if (err != ESP_OK) say("err grab: %s\n", esp_err_to_name(err));
-    else say("ok grab samples=%d rate=40000000 ch=%s mhz=%u gain=%d hdzero=%d score=%.2f paused_ms=%lld\n", n, ch, mhz,
-             decode_gain(), hdz, (double)score, (esp_timer_get_time() - t0) / 1000);
+    else say("ok grab samples=%d rate=40000000 ch=%s mhz=%u gain=%d hdzero=%d score=%.2f filter=%s%s%s paused_ms=%lld\n", n, ch, mhz,
+             decode_gain(), hdz, (double)score, wide ? "wide" : "narrow", wide ? " c5=" : "", wide ? reply : "", (esp_timer_get_time() - t0) / 1000);
     return err == ESP_OK;
 }
 
@@ -781,7 +792,9 @@ void iq_command(int argc, char **argv)
     const char *sub = argc > 1 ? argv[1] : "";
     /* The decoder owns the one PARLIO RX unit while it runs. */
     if (strcmp(sub, "grab") == 0) {
-        iq_grab(argc > 2 ? atoi(argv[2]) : 0);
+        bool wide = argc > 3 && strcmp(argv[3], "wide") == 0;
+        if (wide && argc > 4) s_wide_settle_ms = atoi(argv[4]);
+        iq_grab(argc > 2 ? atoi(argv[2]) : 0, wide);
         return;
     }
     if (strcmp(sub, "dump") != 0) decode_stop();

@@ -225,6 +225,19 @@ static void phy_unlock(void)
 
 static esp_err_t tune_locked(const char *name);
 
+void radio_set_11p(bool on)
+{
+    phy_lock();
+    s_11p = on;
+    phy_11p_set(s_11p, 0);
+    phy_unlock();
+}
+
+bool radio_11p(void)
+{
+    return s_11p;
+}
+
 esp_err_t radio_tune(const char *name)
 {
     phy_lock();

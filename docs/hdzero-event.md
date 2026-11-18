@@ -20,6 +20,8 @@ How to collect HDZero I/Q with the p4vrx receiver and see what it decodes to, on
 3. When the P4 sees HDZero it prints `event hdzero=1 score=… ch=…`. The watcher then grabs 4M samples (100 ms, about 6 frames) every 15 s, up to 4 per detection. Each grab pauses the analog decoder for about 0.1 s; the dump takes about 35 s.
 4. Files land in `captures/hdz/` as `iq-CH-TIME.bin` and `.json`, in hdzero-captures' format. With `--decode`, each is decoded straight away into `iq-CH-TIME-frames/`.
 
+The watcher alternates the C5's receive filter (`--filter ab`): narrow is analog's 802.11p setting, about ±6 MHz; wide turns it off for the grab only, about twice the width, which should recover HDZero's outer bins ([the filter test](experiments/2026-11-18-c5-wide-filter.md)). Each capture's `.json` and `hdzdecode.py`'s line name the filter. `--filter narrow` or `wide` fixes it.
+
 Without detection (a weak signal, or to grab regardless): `--now` takes one capture and exits. `--samples 8000000` takes 200 ms. To test the chain without a transmitter, `--fake 40` makes the P4 report HDZero for 40 s.
 
 ## Decode
@@ -39,5 +41,6 @@ One line per capture: CP strength (HDZero reads 3-7x, analog and noise about 1),
 ## What to look for
 
 - CP over 3x but no special symbols: timing and CFO work, the bits don't. Compare with 191206.
-- Concealed records in the thousands: noisy band edges; try another gain (`decode gain N`, then `--now`).
+- Concealed records in the thousands: noisy band edges. Compare narrow and wide captures of the same pilot; also try another gain (`decode gain N`, then `--now`).
+- If wide wins: `hdz decode wide=1` on the P4.
 - A clipped capture: the `.json`'s gain over about 65 on a strong signal.

@@ -146,6 +146,9 @@ static void run_command(char *line)
         esp_err_t err = radio_tune(argv[1]);
         if (err == ESP_OK) reply("ok tune %s %u", radio_channel(), radio_mhz());
         else reply("err %s", esp_err_to_name(err));
+    } else if (strcmp(argv[0], "11p") == 0 && argc == 2) {
+        radio_set_11p(atoi(argv[1]) != 0);
+        reply("ok 11p %d", radio_11p());
     } else if (strcmp(argv[0], "gain") == 0 && argc == 2) {
         radio_set_gain((uint8_t)atoi(argv[1]));
         reply("ok gain %u", radio_gain());

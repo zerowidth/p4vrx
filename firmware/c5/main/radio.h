@@ -14,6 +14,10 @@ const char *radio_channel(void);
 uint16_t radio_mhz(void);
 void radio_set_gain(uint8_t index);
 uint8_t radio_gain(void);
+/* The PHY's 802.11p setting: on, a receive filter of about 12 MHz and a bus that changes at 40 MS/s; off, about
+ * twice both. */
+void radio_set_11p(bool on);
+bool radio_11p(void);
 /* Wideband RSSI and noise floor in dBm; false when the PHY gave an implausible value. */
 bool radio_rssi(int *dbm);
 bool radio_noise_floor(int *dbm);

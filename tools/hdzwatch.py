@@ -2,11 +2,12 @@
 into captures/hdz/, in hdzero-captures' format (PREFIX.bin + PREFIX.json), so its decode.py reads them as they are.
 
     uv run --with pyserial python tools/hdzwatch.py [--samples 4000000] [--every 15] [--per-detection 4] [--now]
-        [--decode] [--out captures/hdz]
+        [--decode] [--out captures/hdz] [--filter ab|narrow|wide]
 
 --now grabs once straight away and exits, detected or not. --fake SECONDS tests the plumbing without a transmitter: the
 P4 reports HDZero (`hdz fake 1`) for that long, then follows its detector again, and the watcher stops after. --decode runs tools/hdzdecode.py on each new capture in
-the background. Stop with Ctrl-C."""
+the background. --filter picks the C5's receive filter: narrow (802.11p, analog's), wide (twice the width, for
+HDZero's band edges, during the grab only), or ab (the default) to alternate. Stop with Ctrl-C."""
 import argparse
 import base64
 import json
@@ -53,9 +54,9 @@ def keyvals(line):
     return dict(kv.split("=", 1) for kv in line.split() if "=" in kv)
 
 
-def grab(con, samples, out_dir, why):
+def grab(con, samples, out_dir, why, wide=False):
     t0 = time.time()
-    reply = [l for l in con.cmd(f"iq grab {samples}", 15) if l.startswith(("ok grab", "err"))]
+    reply = [l for l in con.cmd(f"iq grab {samples}" + (" wide" if wide else ""), 15) if l.startswith(("ok grab", "err"))]
     if not reply or not reply[0].startswith("ok grab"):
         print(f"grab failed: {reply}", flush=True)
         return None
@@ -84,10 +85,11 @@ def grab(con, samples, out_dir, why):
         "hdzero": int(info.get("hdzero", 0)),
         "score": float(info.get("score", 0)),
         "why": why,
+        "filter": info.get("filter", "narrow"),
         "grab": reply[0],
     }
     prefix.with_suffix(".json").write_text(json.dumps(meta, indent=2) + "\n")
-    print(f"{prefix}.bin: {meta['samples']} samples, {meta['channel']} gain {meta['gain']}, score {meta['score']:.2f}, "
+    print(f"{prefix}.bin: {meta['samples']} samples, {meta['channel']} gain {meta['gain']}, {meta['filter']} filter, score {meta['score']:.2f}, "
           f"{time.time() - t0:.0f} s", flush=True)
     return prefix
 
@@ -101,17 +103,25 @@ def main():
     ap.add_argument("--decode", action="store_true")
     ap.add_argument("--out", default="captures/hdz")
     ap.add_argument("--fake", type=float, default=0)
+    ap.add_argument("--filter", choices=["ab", "narrow", "wide"], default="ab",
+                    help="the C5's receive filter for each grab; ab alternates, so each detection gives both")
     a = ap.parse_args()
     out_dir = pathlib.Path(a.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     con = Console()
+
+    n_grabs = [0]
+
+    def wide():
+        n_grabs[0] += 1
+        return a.filter == "wide" or (a.filter == "ab" and n_grabs[0] % 2 == 0)
 
     def captured(prefix):
         if prefix and a.decode:
             subprocess.Popen([sys.executable, str(pathlib.Path(__file__).parent / "hdzdecode.py"), str(prefix)])
 
     if a.now:
-        captured(grab(con, a.samples, out_dir, "now"))
+        captured(grab(con, a.samples, out_dir, "now", wide()))
         return
     fake_until = time.time() + a.fake if a.fake else None
     if fake_until:
@@ -140,7 +150,7 @@ def main():
             if on and not was:
                 taken = 0
         if on and taken < a.per_detection and time.time() - last >= a.every:
-            prefix = grab(con, a.samples, out_dir, "event")
+            prefix = grab(con, a.samples, out_dir, "event", wide())
             last = time.time()
             if prefix:
                 taken += 1

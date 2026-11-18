@@ -150,7 +150,7 @@ static void upload(size_t n)
 }
 
 /* hdz upload N | hdz run [frames=N] [window=N] [conceal=0|1] [dump=all|a,b] [show=0|1] | hdz decode [samples] [same
- * options] | hdz show off. The first frame stays on the LCD until hdz show off. */
+ * options, and wide=1 for the C5's wide filter] | hdz show off. The first frame stays on the LCD until hdz show off. */
 bool hdzdec_command(int argc, char **argv)
 {
     const char *sub = argc > 1 ? argv[1] : "";
@@ -164,7 +164,7 @@ bool hdzdec_command(int argc, char **argv)
         return true;
     }
     if (strcmp(sub, "run") && strcmp(sub, "decode")) return false;
-    int frames = 1, conceal = 1, first = 2;
+    int frames = 1, conceal = 1, first = 2, wide = 0;
     size_t window = WINDOW, grab = WINDOW;
     if (!strcmp(sub, "decode") && argc > 2 && strchr(argv[2], '=') == NULL) grab = strtoul(argv[2], NULL, 10), first = 3;
     s_dump = "";
@@ -175,6 +175,7 @@ bool hdzdec_command(int argc, char **argv)
         else if (!strncmp(argv[i], "conceal=", 8)) conceal = atoi(argv[i] + 8);
         else if (!strncmp(argv[i], "dump=", 5)) s_dump = argv[i] + 5;
         else if (!strncmp(argv[i], "show=", 5)) s_show = atoi(argv[i] + 5);
+        else if (!strncmp(argv[i], "wide=", 5)) wide = atoi(argv[i] + 5);
     }
     if (strcmp(sub, "decode")) {
         run(frames, window, conceal);
@@ -182,7 +183,7 @@ bool hdzdec_command(int argc, char **argv)
     }
     /* Analog decoding is noise while HDZero is on air, and sharing the cores doubles the burst's time. */
     bool was = decode_rx_pause();
-    if (iq_grab((int)grab)) run(frames, window, conceal);
+    if (iq_grab((int)grab, wide)) run(frames, window, conceal);
     if (was) decode_rx_resume();
     return true;
 }
