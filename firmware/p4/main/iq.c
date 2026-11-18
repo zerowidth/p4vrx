@@ -11,6 +11,7 @@
 #include "driver/parlio_rx.h"
 #include "esp_private/gdma_link.h"
 #include "esp_cache.h"
+#include "esp_rom_crc.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "esp_log.h"
@@ -246,7 +247,33 @@ static void capture_task(void *arg)
 
 /* A long capture's descriptor list outgrows the console task's stack, so it runs on one in PSRAM. The task and
  * its stack are made once, since a task made with caps is not freed by its own exit. */
+static SemaphoreHandle_t s_buf_lock;
+
+static SemaphoreHandle_t buf_lock(void)
+{
+    static StaticSemaphore_t mem;
+    if (!s_buf_lock) s_buf_lock = xSemaphoreCreateMutexStatic(&mem);
+    return s_buf_lock;
+}
+
+void iq_buffer_hold(bool hold)
+{
+    if (hold) xSemaphoreTake(buf_lock(), portMAX_DELAY);
+    else xSemaphoreGive(buf_lock());
+}
+
+static esp_err_t capture_unlocked(uint16_t *buf, size_t samples, parlio_sample_edge_t edge);
+
+/* Waits while an HDZero decode holds the buffer: the decoder's own clock and gain captures land in it too. */
 static esp_err_t capture(uint16_t *buf, size_t samples, parlio_sample_edge_t edge)
+{
+    xSemaphoreTake(buf_lock(), portMAX_DELAY);
+    esp_err_t err = capture_unlocked(buf, samples, edge);
+    xSemaphoreGive(buf_lock());
+    return err;
+}
+
+static esp_err_t capture_unlocked(uint16_t *buf, size_t samples, parlio_sample_edge_t edge)
 {
     static StackType_t *stack;
     static StaticTask_t tcb;
@@ -737,7 +764,21 @@ static void rate_test(int argc, char **argv)
 /* The settle after switching the C5's filter, in ms; `iq grab N wide MS` overrides it for measuring. */
 static int s_wide_settle_ms = 20;
 
-bool iq_grab(int n, bool wide)
+/* A grab that keeps the decoder paused after it (`iq grab ... hold`), until `iq resume`. */
+static bool s_held;
+
+void iq_pause_decoder(void)
+{
+    if (decode_rx_pause()) s_held = true;
+}
+
+void iq_resume_decoder(void)
+{
+    if (s_held) decode_rx_resume();
+    s_held = false;
+}
+
+bool iq_grab(int n, bool wide, bool hold)
 {
     if (n <= 0 || n > MAX_SAMPLES) n = CAPTURE_SAMPLES;
     if (!nano_has_fm()) {
@@ -764,12 +805,16 @@ bool iq_grab(int n, bool wide)
     if (!restored) say("iq grab: C5 kept its wide filter (%s)\n", back);
     s_every = every;
     nano_control(0);
-    if (was) decode_rx_resume();
+    /* Taken before the decoder resumes: something in it has overwritten 256-byte blocks of this buffer. */
+    uint32_t crc = err == ESP_OK ? esp_rom_crc32_le(0, (const uint8_t *)s_psram, (size_t)n * 2) : 0;
+    if (was && !hold) decode_rx_resume();
+    s_held = s_held || (was && hold);
     unsigned mhz;
     const char *ch = iq_channel(&mhz);
     if (err != ESP_OK) say("err grab: %s\n", esp_err_to_name(err));
-    else say("ok grab samples=%d rate=40000000 ch=%s mhz=%u gain=%d hdzero=%d score=%.2f filter=%s%s%s paused_ms=%lld\n", n, ch, mhz,
-             decode_gain(), hdz, (double)score, wide ? "wide" : "narrow", wide ? " c5=" : "", wide ? reply : "", (esp_timer_get_time() - t0) / 1000);
+    else say("ok grab samples=%d rate=40000000 ch=%s mhz=%u gain=%d hdzero=%d score=%.2f filter=%s%s%s crc=%08lx%s paused_ms=%lld\n", n,
+             ch, mhz, decode_gain(), hdz, (double)score, wide ? "wide" : "narrow", wide ? " c5=" : "", wide ? reply : "",
+             (unsigned long)crc, s_held ? " held=1" : "", (esp_timer_get_time() - t0) / 1000);
     return err == ESP_OK;
 }
 
@@ -792,9 +837,18 @@ void iq_command(int argc, char **argv)
     const char *sub = argc > 1 ? argv[1] : "";
     /* The decoder owns the one PARLIO RX unit while it runs. */
     if (strcmp(sub, "grab") == 0) {
-        bool wide = argc > 3 && strcmp(argv[3], "wide") == 0;
-        if (wide && argc > 4) s_wide_settle_ms = atoi(argv[4]);
-        iq_grab(argc > 2 ? atoi(argv[2]) : 0, wide);
+        bool wide = false, hold = false;
+        for (int k = 3; k < argc; ++k) {
+            if (strcmp(argv[k], "wide") == 0) wide = true;
+            else if (strcmp(argv[k], "hold") == 0) hold = true;
+            else if (atoi(argv[k]) > 0) s_wide_settle_ms = atoi(argv[k]);
+        }
+        iq_grab(argc > 2 ? atoi(argv[2]) : 0, wide, hold);
+        return;
+    }
+    if (strcmp(sub, "resume") == 0) {
+        say("ok iq resume%s\n", s_held ? "" : " (nothing held)");
+        iq_resume_decoder();
         return;
     }
     if (strcmp(sub, "dump") != 0) decode_stop();

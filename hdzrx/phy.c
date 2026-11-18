@@ -721,6 +721,7 @@ int hz_receive(const uint16_t *raw, size_t n, double fs_in, const hz_opts *o, hz
     training_runs(rp);
     info->us[HZ_T_RUNS] = now(rp) - t0;
     int frames = 0, max = o->max_frames > 0 ? o->max_frames : 99;
+    if (info->cp_ratio < HZ_MIN_CP && !o->force) max = 0;
     for (int i = 0; i < info->nruns && frames < max; ++i) {
         int a = info->runs[i][0], b = info->runs[i][1];
         int nxt = i + 1 < info->nruns ? info->runs[i + 1][0] : -1;

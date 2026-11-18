@@ -15,6 +15,7 @@ import pathlib
 import subprocess
 import sys
 import time
+import zlib
 
 import numpy as np
 
@@ -40,7 +41,12 @@ def upload(con, prefix):
     for off in range(0, len(data), 16384):
         con.s.write(data[off:off + 16384])
     done = con.lines(time.time() + 30, rb"^(ok upload \d|err)")
-    print(f"{done[-1].decode(errors='replace') if done else 'no reply'} ({len(data) / (time.time() - t0) / 1e3:.0f} KB/s)", flush=True)
+    reply = done[-1].decode(errors="replace") if done else "no reply"
+    crc = f"{zlib.crc32(data):08x}"
+    ok = f"crc={crc}" in reply
+    print(f"{reply} ({len(data) / (time.time() - t0) / 1e3:.0f} KB/s){'' if ok else f' CRC MISMATCH, sent {crc}'}", flush=True)
+    if not ok:
+        sys.exit("upload corrupted")
     con.lines(time.time() + 0.3, rb"^> ?$")
 
 

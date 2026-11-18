@@ -12,12 +12,20 @@ void iq_command(int argc, char **argv);
 /* The last capture: I in the low byte, Q in the high byte, each read as 2v+1. */
 const uint16_t *iq_samples(size_t *count);
 /* Raw 40 MS/s I/Q from the Nano into the capture buffer, pausing the decoder; prints `ok grab ...`. wide turns the
- * C5's 802.11p setting off for the grab, about twice the receive filter's width. */
-bool iq_grab(int n, bool wide);
+ * C5's 802.11p setting off for the grab, about twice the receive filter's width. hold keeps the decoder paused
+ * afterwards, until `iq resume`. */
+bool iq_grab(int n, bool wide, bool hold);
 /* The capture buffer, for samples uploaded from the host, and its size; iq_set_samples marks n of them as the last
  * capture. */
 uint16_t *iq_buffer(size_t *bytes);
 void iq_set_samples(size_t n);
+/* Keeps every other capture out of the buffer while held (an HDZero decode reads it, and keeps its 27 MS/s
+ * samples after the burst). */
+void iq_buffer_hold(bool hold);
+/* Pauses the analog decoder, if it runs, until iq_resume_decoder or `iq resume`: while it runs, something in it
+ * overwrites 256-byte blocks of the capture buffer (2026-11-18, not found yet). */
+void iq_pause_decoder(void);
+void iq_resume_decoder(void);
 /* Resets the C5 into c5rx, tunes it, starts its I/Q export with one of every `every` samples of its
  * 80 MS/s bus, finds a gain that doesn't clip, and moves the C5's clock until the P4's sampling edge reads the
  * lanes while they are steady. */

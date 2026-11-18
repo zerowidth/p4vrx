@@ -52,3 +52,5 @@ The encoder runs only while a UVC host streams (`video encode auto`), so the LCD
 ## Dev practice: fail fast
 
 The boards come up in about a second or not at all. Wait 3-5 s for a console or a boot, retry once, then stop and look at why. Long sleeps and long polling timeouts only hide the failure. Builds and flashes get timeouts as long as they actually take: tens of seconds.
+
+While the analog decoder runs, CPU-written data in the PSRAM capture buffer has been corrupted in blocks of up to 256 bytes; DMA-written captures were not. Uploads and the HDZero decode pause the decoder until done ([experiment](../experiments/2026-11-18-psram-upload-corruption.md)). The cause isn't found, and it may touch other CPU-written PSRAM.

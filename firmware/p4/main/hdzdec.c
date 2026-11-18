@@ -5,15 +5,16 @@
 #include <string.h>
 
 #include "esp_heap_caps.h"
+#include "esp_rom_crc.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 #include "console.h"
-#include "decode.h"
 #include "hdzrx.h"
 #include "iq.h"
 #include "lcd.h"
+#include "usb.h"
 
 /* At least one whole frame and the next training run (35 ms at 40 MS/s). */
 #define WINDOW 1400000
@@ -90,7 +91,7 @@ static void on_frame(void *ctx, const hz_frame *f)
 }
 
 static char s_mode[16];
-static int s_ref_runs, s_no_gap;
+static int s_ref_runs, s_no_gap, s_force;
 
 static void run(int frames, size_t window, int conceal)
 {
@@ -105,12 +106,16 @@ static void run(int frames, size_t window, int conceal)
     size_t used = ((const uint8_t *)raw - buf) + (n * 2 + 127) / 128 * 128;
     hz_opts o = {.dump = dump, .want = want, .alloc = alloc, .alloc_fast = alloc_fast, .release = heap_caps_free, .now_us = now_us, .yield = yield,
                  .max_frames = frames, .no_conceal = !conceal,
-                 .mode = s_mode[0] ? s_mode : NULL, .ref_runs = s_ref_runs, .no_gap = s_no_gap};
+                 .mode = s_mode[0] ? s_mode : NULL, .ref_runs = s_ref_runs, .no_gap = s_no_gap, .force = s_force};
     if (used < cap) o.y_buf = (hz_cf *)(buf + used), o.y_cap = (cap - used) / sizeof(hz_cf);
     size_t free_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM), internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
     hz_info info;
     int64_t t0 = esp_timer_get_time();
+    iq_pause_decoder();
+    iq_buffer_hold(true);
     int got = hz_receive(raw, n, 40e6, &o, &info, on_frame, NULL);
+    iq_buffer_hold(false);
+    iq_resume_decoder();
     int64_t total = esp_timer_get_time() - t0;
     if (got < 0) {
         say("err hdz run: no memory (%u bytes of PSRAM free)\n", (unsigned)free_before);
@@ -139,25 +144,32 @@ static void upload(size_t n)
         say("err hdz upload: 1..%u samples\n", (unsigned)(cap / 2));
         return;
     }
+    /* The analog decoder stays paused until hdz run (or iq resume): it corrupts the buffer while it runs. */
+    iq_pause_decoder();
     say("ok upload ready %u\n", (unsigned)n);
     size_t got = 0, want = n * 2;
     int64_t t0 = esp_timer_get_time();
-    /* host_read can return 0 before its timeout (a stale wake-up), so give up only after 3 s without data. */
+    iq_buffer_hold(true);
+    /* A read can return 0 before its timeout (a stale wake-up), so give up only after 3 s without data. */
     int64_t last = t0;
     while (got < want && esp_timer_get_time() - last < 3000000) {
-        size_t r = host_read(buf + got, want - got, 100);
+        /* USB only: host_read takes UART bytes first, and stray ones there were spliced into the upload. */
+        size_t r = usb_console_read(buf + got, want - got, 100);
         if (r) got += r, last = esp_timer_get_time();
     }
     if (got < want) {
+        iq_buffer_hold(false);
         say("err hdz upload: %u of %u bytes\n", (unsigned)got, (unsigned)want);
         return;
     }
     iq_set_samples(n);
-    say("ok upload %u samples in %lld ms\n", (unsigned)n, (esp_timer_get_time() - t0) / 1000);
+    iq_buffer_hold(false);
+    say("ok upload %u samples in %lld ms crc=%08lx\n", (unsigned)n, (esp_timer_get_time() - t0) / 1000,
+        (unsigned long)esp_rom_crc32_le(0, buf, want));
 }
 
 /* hdz upload N | hdz run [frames=N] [window=N] [conceal=0|1] [dump=all|a,b] [show=0|1]
- * [mode=720p60|540p90|1080p30|960x720p60, else detected] [runs=hdzrx|ref] [gap=0|1] | hdz decode [samples] [same
+ * [mode=720p60|540p90|1080p30|960x720p60, else detected] [runs=hdzrx|ref] [gap=0|1] [force=1: decode under CP 1.8x] | hdz decode [samples] [same
  * options, and wide=1 for the C5's wide filter] | hdz show off. The first frame stays on the LCD until hdz show off. */
 bool hdzdec_command(int argc, char **argv)
 {
@@ -178,7 +190,7 @@ bool hdzdec_command(int argc, char **argv)
     s_dump = "";
     s_show = true;
     s_mode[0] = 0;
-    s_ref_runs = s_no_gap = 0;
+    s_ref_runs = s_no_gap = s_force = 0;
     for (int i = first; i < argc; ++i) {
         if (!strncmp(argv[i], "frames=", 7)) frames = atoi(argv[i] + 7);
         else if (!strncmp(argv[i], "window=", 7)) window = strtoul(argv[i] + 7, NULL, 10);
@@ -189,14 +201,14 @@ bool hdzdec_command(int argc, char **argv)
         else if (!strncmp(argv[i], "mode=", 5)) strlcpy(s_mode, argv[i] + 5, sizeof s_mode);
         else if (!strncmp(argv[i], "runs=", 5)) s_ref_runs = !strcmp(argv[i] + 5, "ref");
         else if (!strncmp(argv[i], "gap=", 4)) s_no_gap = !atoi(argv[i] + 4);
+        else if (!strncmp(argv[i], "force=", 6)) s_force = atoi(argv[i] + 6);
     }
     if (strcmp(sub, "decode")) {
         run(frames, window, conceal);
         return true;
     }
     /* Analog decoding is noise while HDZero is on air, and sharing the cores doubles the burst's time. */
-    bool was = decode_rx_pause();
-    if (iq_grab((int)grab, wide)) run(frames, window, conceal);
-    if (was) decode_rx_resume();
+    if (iq_grab((int)grab, wide, true)) run(frames, window, conceal);
+    iq_resume_decoder();
     return true;
 }

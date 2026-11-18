@@ -81,7 +81,8 @@ def main():
     else:
         cdir = HERE / "captures/hdzc" / name
         cdir.mkdir(parents=True, exist_ok=True)
-        subprocess.run([str(build()), prefix, str(cdir), "--window", str(a.window), "--frames", str(a.frames)], check=True)
+        subprocess.run([str(build()), prefix, str(cdir), "--window", str(a.window), "--frames", str(a.frames), "--force"],
+                       check=True)
     info = json.load(open(cdir / "info.json"))
     frames_c = json.load(open(cdir / "frames.json")) if (cdir / "frames.json").exists() else []
     rep = Report()

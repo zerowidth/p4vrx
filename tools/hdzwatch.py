@@ -5,8 +5,8 @@ into captures/hdz/, in hdzero-captures' format (PREFIX.bin + PREFIX.json), so it
         [--decode] [--out captures/hdz] [--filter ab|narrow|wide]
 
 --now grabs once straight away and exits, detected or not. --fake SECONDS tests the plumbing without a transmitter: the
-P4 reports HDZero (`hdz fake 1`) for that long, then follows its detector again, and the watcher stops after. --decode runs tools/hdzdecode.py on each new capture in
-the background. --filter picks the C5's receive filter: narrow (802.11p, analog's), wide (twice the width, for
+P4 reports HDZero (`hdz fake 1`) for that long, then follows its detector again, and the watcher stops after. --decode runs tools/hdzdecode.py --both (hdzrx and the C port) on each new
+capture in the background. --filter picks the C5's receive filter: narrow (802.11p, analog's), wide (twice the width, for
 HDZero's band edges, during the grab only), or ab (the default) to alternate. Stop with Ctrl-C."""
 import argparse
 import base64
@@ -16,6 +16,7 @@ import re
 import subprocess
 import sys
 import time
+import zlib
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 from p4cmd import open_console  # noqa: E402
@@ -56,8 +57,10 @@ def keyvals(line):
 
 def grab(con, samples, out_dir, why, wide=False):
     t0 = time.time()
-    reply = [l for l in con.cmd(f"iq grab {samples}" + (" wide" if wide else ""), 15) if l.startswith(("ok grab", "err"))]
+    # hold: the analog decoder stays paused through the dump, since it has corrupted the capture buffer while running
+    reply = [l for l in con.cmd(f"iq grab {samples}" + (" wide" if wide else "") + " hold", 15) if l.startswith(("ok grab", "err"))]
     if not reply or not reply[0].startswith("ok grab"):
+        con.cmd("iq resume", 2)
         print(f"grab failed: {reply}", flush=True)
         return None
     info = keyvals(reply[0])
@@ -66,6 +69,10 @@ def grab(con, samples, out_dir, why, wide=False):
     data = b"".join(l for l in body if B64.match(l) and not l.startswith(b"iq"))
     raw = base64.b64decode(data)
     con.lines(time.time() + 0.5, rb"^> ?$")
+    con.cmd("iq resume", 2)
+    crc_ok = "crc" not in info or f"{zlib.crc32(raw):08x}" == info["crc"]
+    if not crc_ok:
+        print(f"dump CRC {zlib.crc32(raw):08x} against the grab's {info['crc']}: corrupted", flush=True)
     if len(raw) != 2 * int(info["samples"]):
         print(f"dump short: {len(raw)} bytes of {2 * int(info['samples'])}", flush=True)
         return None
@@ -86,10 +93,12 @@ def grab(con, samples, out_dir, why, wide=False):
         "score": float(info.get("score", 0)),
         "why": why,
         "filter": info.get("filter", "narrow"),
+        "crc_ok": crc_ok,
         "grab": reply[0],
     }
     prefix.with_suffix(".json").write_text(json.dumps(meta, indent=2) + "\n")
-    print(f"{prefix}.bin: {meta['samples']} samples, {meta['channel']} gain {meta['gain']}, {meta['filter']} filter, score {meta['score']:.2f}, "
+    print(f"{prefix}.bin: {meta['samples']} samples, {meta['channel']} gain {meta['gain']}, {meta['filter']} filter, "
+          f"CRC {'ok' if crc_ok else 'BAD'}, score {meta['score']:.2f}, "
           f"{time.time() - t0:.0f} s", flush=True)
     return prefix
 
@@ -118,7 +127,7 @@ def main():
 
     def captured(prefix):
         if prefix and a.decode:
-            subprocess.Popen([sys.executable, str(pathlib.Path(__file__).parent / "hdzdecode.py"), str(prefix)])
+            subprocess.Popen([sys.executable, str(pathlib.Path(__file__).parent / "hdzdecode.py"), "--both", str(prefix)])
 
     if a.now:
         captured(grab(con, a.samples, out_dir, "now", wide()))

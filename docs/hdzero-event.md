@@ -17,7 +17,7 @@ How to collect HDZero I/Q with the p4vrx receiver and see what it decodes to, on
    uv run --with pyserial python tools/hdzwatch.py --decode
    ```
 
-3. When the P4 sees HDZero it prints `event hdzero=1 score=… ch=…`. The watcher then grabs 4M samples (100 ms, about 6 frames) every 15 s, up to 4 per detection. Each grab pauses the analog decoder for about 0.1 s; the dump takes about 35 s.
+3. When the P4 sees HDZero it prints `event hdzero=1 score=… ch=…`. The watcher then grabs 4M samples (100 ms, about 6 frames) every 15 s, up to 4 per detection. Each grab pauses the analog decoder through its dump (about 35 s for 4M samples; `iq grab ... hold`, then `iq resume`), and the watcher checks the dump against the grab's CRC (`CRC ok` in its line, `crc_ok` in the `.json`).
 4. Files land in `captures/hdz/` as `iq-CH-TIME.bin` and `.json`, in hdzero-captures' format. With `--decode`, each is decoded straight away into `iq-CH-TIME-frames/`.
 
 The watcher alternates the C5's receive filter (`--filter ab`): narrow is analog's 802.11p setting, about ±6 MHz; wide turns it off for the grab only, about twice the width, which should recover HDZero's outer bins ([the filter test](experiments/2026-11-18-c5-wide-filter.md)). Each capture's `.json` and `hdzdecode.py`'s line name the filter. `--filter narrow` or `wide` fixes it.
@@ -27,10 +27,10 @@ Without detection (a weak signal, or to grab regardless): `--now` takes one capt
 ## Decode
 
 ```bash
-uv run python tools/hdzdecode.py captures/hdz
+uv run --with-requirements ../hdzero-captures/requirements.txt python tools/hdzdecode.py --both captures/hdz
 ```
 
-One line per capture: CP strength (HDZero reads 3-7x, analog and noise about 1), carrier offset, frames, how many had special symbols, and the concealed-record median. PNG frames and the full log are in each `-frames/` folder. On the 2026-11-04 captures: 191225 and 191250 decode with 11 frames and specials in each; 191237 partly; 191206 syncs but its bits don't decode (hdzrx's float32 running sum in cp_sync, see [the gap list](hdzero-gaps.md); the C decoder decodes it).
+`--both` runs hdzrx and our C port (`--c` the C port alone). The C port takes the whole capture, detects each frame's mode (720p60, 540p90, 1080p30, 960x720p60), and doesn't have hdzrx's float32 sync failure: on 191206's 200 ms it decodes 11 frames, all with special symbols, where hdzrx finds none. Its PNGs go to `-c/`. One line per capture and decoder: CP strength (HDZero reads 3-7x, analog and noise about 1), carrier offset, frames, how many had special symbols, and the concealed-record median. PNG frames and the full log are in each `-frames/` folder. On the 2026-11-04 captures: 191225 and 191250 decode with 11 frames and specials in each; 191237 partly; 191206 syncs but its bits don't decode (hdzrx's float32 running sum in cp_sync, see [the gap list](hdzero-gaps.md); the C decoder decodes it).
 
 ## Decode on the P4
 

@@ -12,6 +12,8 @@
 #define HZ_SYM (HZ_N + HZ_CP)
 #define HZ_MAX_RUNS 16
 #define HZ_MAX_DATA 817
+/* CP peak over mean: HDZero reads 3-7 (2.9 over 200 ms, which timing drift smears), analog FM and noise 1.0-1.4, whose flat stretches still look like training runs. */
+#define HZ_MIN_CP 1.8f
 
 /* A video mode (hdzero-reference's modes.py, SPEC 3.6): the PHY is the same in all; these sizes differ. */
 typedef struct {
@@ -59,6 +61,8 @@ typedef struct {
     int ref_runs;
     /* 1: leave out the gap rule (SPEC 7.2), as hdzrx does. */
     int no_gap;
+    /* 1: decode frames even when the CP correlation says this isn't OFDM (under HZ_MIN_CP). */
+    int force;
 } hz_opts;
 
 enum { HZ_T_LOAD, HZ_T_RESAMPLE, HZ_T_SYNC, HZ_T_WHOLE_BIN, HZ_T_RUNS, HZ_T_EQUALIZE, HZ_T_STREAM, HZ_T_CODEC, HZ_T_N };
