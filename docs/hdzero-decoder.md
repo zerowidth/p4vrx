@@ -15,6 +15,15 @@ Each is a function in `hdzrx/phy.c` or `hdzrx/codec.c` with the Python function'
 
 Later FPGA stages (timing, CFO, resampler, FFT) replace stages 1-4 behind the same per-symbol spectra.
 
+## Modes and reference behaviour
+
+- Modes from hdzero-reference's `modes.py`: 720p60, 540p90, 1080p30 and 960x720p60, all on the same PHY, with their own data-symbol count, regular specials, block sizes and picture size. Each frame's mode is detected as the reference does: by the distance to the next training run (within 3 symbols), with the run length telling 720p60 (12-14) from 960x720p60 (52), or by the run length alone. `mode=` (P4) or `--mode` (Mac) forces one. 540p60n runs at 17 MS/s and needs another front end, so it isn't here.
+- Only 720p60 has been decoded from real signals; the other modes follow the reference's tables untested. Forced onto the Nov 4 captures, each runs clean under AddressSanitizer.
+- 1080p30 needs about 2.6M samples at 40 MS/s for one frame and the next run, more than `hdz decode`'s 1.4M default, and its buffers don't fit the P4 beside a long capture.
+- The gap rule (SPEC 7.2) is on: in a frame with more specials than its mode's regular count, each extra one leaves a symbol's worth of slots out before X, and the records they would have filled are concealed. `gap=0` / `--no-gap` turns it off, as hdzrx has it. The Nov 4 captures have no such frame.
+- `runs=ref` / `--ref-runs` uses the reference's training-run rule (over 0.7 with gaps of 2 bridged, end trimmed to 0.85 then extended while over 0.5, at least 8) instead of hdzrx's (over 0.6, 10 in a row). On 100 ms of each Nov 4 capture both find the same runs; the reference's should hold through a dropout.
+- The P4 differs from the Mac build on weak bins: on 191250, 3,344 of 335,062 slots (1%) and 1,004 concealed records against 990. The per-bin trim's fine phase comes from the 4th power of the data, which is near zero on a few band-edge bins (-418..-395, +293, +316), so rounding and libm differences move it by up to 16 degrees. 191225 matches exactly. A decision-directed refinement of each bin's gain and phase was tried and concealed more records on all four captures (the noisy-bin limit tightens as the good bins improve), so it isn't in.
+
 ## On the P4
 
 - `hdz upload N` takes N raw I/Q words over the USB console into the capture buffer (4.5 MB/s), `hdz run [frames=N] [dump=...]` decodes the capture buffer, and `hdz decode [samples]` grabs from the Nano first. Results come back as `hdz frame {json}` and `hdz info {json}` lines, dumps as `dump NAME BYTES`, base64, `dump end`.

@@ -49,27 +49,27 @@ static bool s_show = true;
 
 static uint8_t clip(float v) { return v < 0 ? 0 : v > 255 ? 255 : (uint8_t)(v + 0.5f); }
 
-/* The frame into the panel's 720x480 packed 4:2:0 (C Y Y a pixel pair; the PPA reads U on even rows), 16:9
- * letterboxed in the 4:3 picture: 354 rows, nearest coded pixel, with section 11.2's range expansion. */
+/* The frame into the panel's 720x480 packed 4:2:0 (C Y Y a pixel pair; the PPA reads U on even rows), nearest coded
+ * pixel, with section 11.2's range expansion. A 16:9 mode is letterboxed in the 4:3 picture (354 rows). */
 static void to_lcd(const hz_frame *f)
 {
     if (!s_lcd) s_lcd = heap_caps_aligned_calloc(128, 1, 720 * 480 * 3 / 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
     if (!s_lcd) return;
-    const int rows = 354, top = (480 - rows) / 2;
+    const int W = f->width, H = f->height, rows = f->mode->wide ? 354 : 480, top = (480 - rows) / 2;
     for (int y = 0; y < 480; ++y) {
         uint8_t *o = s_lcd + y * 1080;
-        int sy = (y - top) * 720 / rows;
+        int sy = (y - top) * H / rows;
         bool in = y >= top && y < top + rows;
-        const int16_t *c = in ? (y & 1 ? f->cr : f->cb) + sy * 480 : NULL;
+        const int16_t *c = in ? (y & 1 ? f->cr : f->cb) + sy * (W / 2) : NULL;
         for (int p = 0; p < 360; ++p) {
             if (!in) {
                 o[3 * p] = 128, o[3 * p + 1] = o[3 * p + 2] = 0;
                 continue;
             }
-            int sx0 = (2 * p) * 960 / 720, sx1 = (2 * p + 1) * 960 / 720;
+            int sx0 = (2 * p) * W / 720, sx1 = (2 * p + 1) * W / 720;
             o[3 * p] = clip(1.14f * c[sx0 / 2] + 128);
-            o[3 * p + 1] = clip(1.14f * (f->y[sy * 960 + sx0] - 128) + 129);
-            o[3 * p + 2] = clip(1.14f * (f->y[sy * 960 + sx1] - 128) + 129);
+            o[3 * p + 1] = clip(1.14f * (f->y[sy * W + sx0] - 128) + 129);
+            o[3 * p + 2] = clip(1.14f * (f->y[sy * W + sx1] - 128) + 129);
         }
     }
     lcd_still(s_lcd);
@@ -82,9 +82,15 @@ static void on_frame(void *ctx, const hz_frame *f)
     int o = 0;
     for (int i = 0; i < f->nspecials && o < (int)sizeof sp - 8; ++i) o += snprintf(sp + o, sizeof sp - o, "%s%d", i ? ", " : "", f->specials[i]);
     sp[o] = 0;
-    say("hdz frame {\"index\": %d, \"o0\": %d, \"rot\": %d, \"hp_zero_fraction\": %.4f, \"nslots\": %d, \"concealed\": %d, \"specials\": [%s]}\n",
-        f->index, f->o0, f->rot, (double)f->hp_zero_fraction, f->nslots, f->nmissing, sp);
+    static char line[512];
+    int n = snprintf(line, sizeof line, "hdz frame {\"index\": %d, \"mode\": \"%s\", \"width\": %d, \"height\": %d, \"o0\": %d, \"rot\": %d, "
+        "\"hp_zero_fraction\": %.4f, \"nslots\": %d, \"gap\": %d, \"concealed\": %d, \"specials\": [%s]}\n", f->index, f->mode->name,
+        f->width, f->height, f->o0, f->rot, (double)f->hp_zero_fraction, f->nslots, f->gap, f->nmissing, sp);
+    host_write(line, n < (int)sizeof line ? n : (int)sizeof line - 1);
 }
+
+static char s_mode[16];
+static int s_ref_runs, s_no_gap;
 
 static void run(int frames, size_t window, int conceal)
 {
@@ -98,7 +104,8 @@ static void run(int frames, size_t window, int conceal)
     if (n > window) n = window;
     size_t used = ((const uint8_t *)raw - buf) + (n * 2 + 127) / 128 * 128;
     hz_opts o = {.dump = dump, .want = want, .alloc = alloc, .alloc_fast = alloc_fast, .release = heap_caps_free, .now_us = now_us, .yield = yield,
-                 .max_frames = frames, .no_conceal = !conceal};
+                 .max_frames = frames, .no_conceal = !conceal,
+                 .mode = s_mode[0] ? s_mode : NULL, .ref_runs = s_ref_runs, .no_gap = s_no_gap};
     if (used < cap) o.y_buf = (hz_cf *)(buf + used), o.y_cap = (cap - used) / sizeof(hz_cf);
     size_t free_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM), internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
     hz_info info;
@@ -149,7 +156,8 @@ static void upload(size_t n)
     say("ok upload %u samples in %lld ms\n", (unsigned)n, (esp_timer_get_time() - t0) / 1000);
 }
 
-/* hdz upload N | hdz run [frames=N] [window=N] [conceal=0|1] [dump=all|a,b] [show=0|1] | hdz decode [samples] [same
+/* hdz upload N | hdz run [frames=N] [window=N] [conceal=0|1] [dump=all|a,b] [show=0|1]
+ * [mode=720p60|540p90|1080p30|960x720p60, else detected] [runs=hdzrx|ref] [gap=0|1] | hdz decode [samples] [same
  * options, and wide=1 for the C5's wide filter] | hdz show off. The first frame stays on the LCD until hdz show off. */
 bool hdzdec_command(int argc, char **argv)
 {
@@ -169,6 +177,8 @@ bool hdzdec_command(int argc, char **argv)
     if (!strcmp(sub, "decode") && argc > 2 && strchr(argv[2], '=') == NULL) grab = strtoul(argv[2], NULL, 10), first = 3;
     s_dump = "";
     s_show = true;
+    s_mode[0] = 0;
+    s_ref_runs = s_no_gap = 0;
     for (int i = first; i < argc; ++i) {
         if (!strncmp(argv[i], "frames=", 7)) frames = atoi(argv[i] + 7);
         else if (!strncmp(argv[i], "window=", 7)) window = strtoul(argv[i] + 7, NULL, 10);
@@ -176,6 +186,9 @@ bool hdzdec_command(int argc, char **argv)
         else if (!strncmp(argv[i], "dump=", 5)) s_dump = argv[i] + 5;
         else if (!strncmp(argv[i], "show=", 5)) s_show = atoi(argv[i] + 5);
         else if (!strncmp(argv[i], "wide=", 5)) wide = atoi(argv[i] + 5);
+        else if (!strncmp(argv[i], "mode=", 5)) strlcpy(s_mode, argv[i] + 5, sizeof s_mode);
+        else if (!strncmp(argv[i], "runs=", 5)) s_ref_runs = !strcmp(argv[i] + 5, "ref");
+        else if (!strncmp(argv[i], "gap=", 4)) s_no_gap = !atoi(argv[i] + 4);
     }
     if (strcmp(sub, "decode")) {
         run(frames, window, conceal);

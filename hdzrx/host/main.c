@@ -1,6 +1,7 @@
 /* Mac build of the receiver: decode a capture and write each stage's intermediates for tools/hdzcompare.py.
  *
  *     hdzrx_host PREFIX OUTDIR [--window N] [--frames N] [--dump all|none|name,name] [--no-conceal]
+ *         [--mode NAME] [--ref-runs] [--no-gap]
  *
  * Takes the first N samples (default 1,400,000, what the P4 decodes) after the capture's unsettled ones. */
 #include <stdio.h>
@@ -47,19 +48,22 @@ static void on_frame(void *ctx, const hz_frame *f)
     char path[1024];
     snprintf(path, sizeof path, "%s/f%d.ppm", s_out, f->index);
     FILE *o = fopen(path, "wb");
-    fprintf(o, "P6 1280 720 255\n");
-    static uint8_t row[1280 * 3];
-    for (int y = 0; y < 720; ++y) {
-        hz_row_rgb(f->y + y * 960, f->cb + y * 480, f->cr + y * 480, row, 1280);
-        fwrite(row, 1, sizeof row, o);
+    int dw = f->mode->wide ? f->width * 4 / 3 : f->width;
+    fprintf(o, "P6 %d %d 255\n", dw, f->height);
+    static uint8_t row[1920 * 3];
+    for (int y = 0; y < f->height; ++y) {
+        hz_row_rgb(f->y + y * f->width, f->cb + y * f->width / 2, f->cr + y * f->width / 2, f->width, row, dw);
+        fwrite(row, 1, (size_t)dw * 3, o);
     }
     fclose(o);
-    fprintf(s_frames, "%s{\"index\": %d, \"o0\": %d, \"rot\": %d, \"hp_zero_fraction\": %.4f, \"nslots\": %d, \"concealed\": %d, \"specials\": [",
-            f->index ? ", " : "", f->index, f->o0, f->rot, f->hp_zero_fraction, f->nslots, f->nmissing);
+    fprintf(s_frames, "%s{\"index\": %d, \"o0\": %d, \"rot\": %d, \"hp_zero_fraction\": %.4f, \"nslots\": %d, \"concealed\": %d, \"mode\": \"%s\", \"gap\": %d, \"specials\": [",
+            f->index ? ", " : "", f->index, f->o0, f->rot, f->hp_zero_fraction, f->nslots, f->nmissing, f->mode->name, f->gap);
     for (int i = 0; i < f->nspecials; ++i) fprintf(s_frames, "%s%d", i ? ", " : "", f->specials[i]);
     fprintf(s_frames, "]}");
-    printf("  frame %d: specials %d, %d slots (need %d), %d records concealed, HP zero fraction %.3f\n", f->index,
-           f->nspecials, f->nslots, HZ_NEED, f->nmissing, f->hp_zero_fraction);
+    const hz_mode *m = f->mode;
+    printf("  frame %d: %s, specials %d, %d slots (need %d, gap %d), %d records concealed, HP zero fraction %.3f\n", f->index,
+           m->name, f->nspecials, f->nslots, (2 * m->luma + 2 * m->chroma) * m->cols * m->rows, f->gap, f->nmissing,
+           f->hp_zero_fraction);
 }
 
 static double json_num(const char *js, const char *key, double dflt)
@@ -86,6 +90,9 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc) o.max_frames = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--dump") && i + 1 < argc) s_dump = argv[++i];
         else if (!strcmp(argv[i], "--no-conceal")) o.no_conceal = 1;
+        else if (!strcmp(argv[i], "--mode") && i + 1 < argc) o.mode = argv[++i];
+        else if (!strcmp(argv[i], "--ref-runs")) o.ref_runs = 1;
+        else if (!strcmp(argv[i], "--no-gap")) o.no_gap = 1;
     }
     char path[1024];
     snprintf(path, sizeof path, "%s.json", argv[1]);

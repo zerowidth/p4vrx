@@ -270,8 +270,7 @@ static void training_runs(rx_t *r)
     int nsym = (r->L - r->start) / HZ_SYM - 1;
     r->info->nsym = nsym;
     hz_cf *cur = W->cur, *prev = W->prev;
-    uint8_t *hi = calloc(nsym > 1 ? nsym : 1, 1);
-    float *cs = r->o->dump ? calloc(nsym > 1 ? nsym : 1, sizeof(float)) : NULL;
+    float *cs = calloc(nsym > 1 ? nsym : 1, sizeof(float));
     for (int t = 0; t < nsym; ++t) {
         symbol(r, t, cur);
         if (t) {
@@ -284,31 +283,41 @@ static void training_runs(rx_t *r)
                 ea += crealf(a * conjf(a));
                 eb += crealf(bb * conjf(bb));
             }
-            float v = cabsf(c) / sqrtf(ea * eb);
-            hi[t - 1] = v > 0.6f;
-            if (cs) cs[t - 1] = v;
+            cs[t - 1] = cabsf(c) / sqrtf(ea * eb);
         }
         memcpy(prev, cur, HZ_N * sizeof(hz_cf));
     }
-    if (cs) dump(r, "coherence", cs, (size_t)(nsym - 1) * sizeof(float));
-    free(cs);
-    int nr = 0;
-    for (int t = 0; t < nsym - 1;) {
-        if (hi[t]) {
-            int j = t;
-            while (j < nsym - 1 && hi[j]) ++j;
-            if (j - t >= LONG_RUN_MIN && nr < HZ_MAX_RUNS) {
-                r->info->runs[nr][0] = t;
-                r->info->runs[nr][1] = j + 1;
-                ++nr;
+    int nc = nsym - 1, nr = 0;
+    dump(r, "coherence", cs, (size_t)nc * sizeof(float));
+    for (int t = 0; t < nc && nr < HZ_MAX_RUNS;) {
+        if (!r->o->ref_runs) {
+            if (!(cs[t] > 0.6f)) {
+                ++t;
+                continue;
             }
+            int j = t;
+            while (j < nc && cs[j] > 0.6f) ++j;
+            if (j - t >= LONG_RUN_MIN) r->info->runs[nr][0] = t, r->info->runs[nr][1] = j + 1, ++nr;
             t = j;
-        } else {
-            ++t;
+            continue;
         }
+        /* hdzero-reference frame.py training_runs: hits over 0.7 with gaps of up to 2 bridged, the end trimmed back
+         * to one over 0.85, then extended while over 0.5 (a dropout late in the run), at least 8 symbols. */
+        if (!(cs[t] > 0.7f)) {
+            ++t;
+            continue;
+        }
+        int a = t, b = t;
+        for (int k = t + 1; k < nc && k - b <= 3; ++k)
+            if (cs[k] > 0.7f) b = k;
+        int next = b + 1;
+        while (b > a && cs[b] < 0.85f) --b;
+        while (b + 1 < nc && cs[b + 1] > 0.5f) ++b;
+        if (b + 1 - a >= 8) r->info->runs[nr][0] = a, r->info->runs[nr][1] = b + 2, ++nr;
+        t = next > b + 1 ? next : b + 1;
     }
     r->info->nruns = nr;
-    free(hi);
+    free(cs);
 }
 
 static void unwrap(float *ph, int n)
@@ -405,10 +414,10 @@ static void equalize(const hz_cf *St, const hz_cf *H, hz_cf *out)
 }
 
 /* Section 4.3 by boost: the scattered-pilot offset of data symbol 0 (data symbol j has o0 - 8j). */
-static int scattered_offset_d0(hz_cf *const *E)
+static int scattered_offset_d0(hz_cf *const *E, int ndata)
 {
     double score[4] = {0};
-    for (int j = 0; j < HZ_N_DATA; ++j) {
+    for (int j = 0; j < ndata; ++j) {
         double cm[4] = {0};
         int cn[4] = {0};
         for (int b = -300; b < 300; ++b) {
@@ -456,7 +465,7 @@ static float median(float *v, int n)
 
 /* Per-bin gain and phase trim (hdzrx's per_bin_trim): phase from the data's 4th power, its 90-degree choice from
  * angle(mean T^2) / 2, gain from data power. Scattered-pilot REs are left out of the data statistics. */
-static void per_bin_trim(hz_cf *const *E, const int *offsets, hz_cf *const *Teq, int nt, hz_cf *trim)
+static void per_bin_trim(hz_cf *const *E, const int *offsets, int ndata, hz_cf *const *Teq, int nt, hz_cf *trim)
 {
     float *pw = W->pw;
     for (int k = 0; k < HZ_N; ++k) {
@@ -465,7 +474,7 @@ static void per_bin_trim(hz_cf *const *E, const int *offsets, hz_cf *const *Teq,
         float p2 = 0;
         int w = 0;
         for (int t = 0; t < nt; ++t) t2 += Teq[t][k] * Teq[t][k];
-        for (int j = 0; j < HZ_N_DATA; ++j) {
+        for (int j = 0; j < ndata; ++j) {
             if (km == offsets[j]) continue;
             hz_cf e = E[j][k], e2 = e * e;
             p4 += e2 * e2;
@@ -488,12 +497,12 @@ static void per_bin_trim(hz_cf *const *E, const int *offsets, hz_cf *const *Teq,
         trim[k] /= amp > 1e-3f ? amp : 1e-3f;
     }
     double p = 0;
-    for (int j = 0; j < HZ_N_DATA; ++j)
+    for (int j = 0; j < ndata; ++j)
         for (int k = 312; k < 712; ++k) {
             hz_cf e = E[j][k] * trim[k];
             p += crealf(e * conjf(e));
         }
-    float norm = (float)sqrt(p / (HZ_N_DATA * 400.0));
+    float norm = (float)sqrt(p / (ndata * 400.0));
     for (int k = 0; k < HZ_N; ++k) trim[k] /= norm;
 }
 
@@ -526,46 +535,49 @@ static int points(const hz_cf *z, int o, hz_cf rot, hz_cf *pts, int16_t *bins)
     return n;
 }
 
-static int decode_frame(rx_t *r, int fi, int a, int b, int nxt, hz_frame_cb cb, void *ctx)
+static int decode_frame(rx_t *r, int fi, int a, int b, int nxt, const hz_mode *m, hz_frame_cb cb, void *ctx)
 {
     const hz_opts *o = r->o;
+    const int nd = m->ndata, PW = 16 * m->cols, Hh = 8 * m->rows, ecap = nd / 4 + 2;
     int nt = b - 1 - (a + 1);
     int xi = nxt >= 0 ? nxt - 2 : -1;
     int64_t t0 = now(r);
     char name[32];
     hz_cf *H = xalloc(r, HZ_N * sizeof(hz_cf)), *trim = xalloc(r, HZ_N * sizeof(hz_cf));
-    hz_cf *E = xalloc(r, (size_t)HZ_N_DATA * HZ_N * sizeof(hz_cf));
+    hz_cf *E = xalloc(r, (size_t)nd * HZ_N * sizeof(hz_cf));
     hz_cf *Tb = xalloc(r, (size_t)nt * HZ_N * sizeof(hz_cf));
     hz_cf *X = xalloc(r, HZ_N * sizeof(hz_cf));
-    hz_cf *Er[HZ_N_DATA], **Tr = malloc(nt * sizeof(hz_cf *));
-    uint8_t *slots = xalloc(r, (size_t)(HZ_N_DATA + 1) * MAX_PTS);
-    int16_t *Y = xalloc(r, 720 * 960 * 2), *Cb = xalloc(r, 720 * 480 * 2), *Cr = xalloc(r, 720 * 480 * 2);
-    uint8_t *missing = xalloc(r, HZ_ROWS * HZ_COLS);
-    float *err = xalloc(r, (size_t)HZ_N * 112 * sizeof(float));
-    uint8_t *errn = calloc(HZ_N, 1);
+    hz_cf **Er = malloc(nd * sizeof(hz_cf *)), **Tr = malloc(nt * sizeof(hz_cf *));
+    int *offsets = malloc(nd * sizeof(int));
+    /* the data, a gap of up to all the specials' slots, and X */
+    uint8_t *slots = xalloc(r, (size_t)(nd + 1) * MAX_PTS);
+    int16_t *Y = xalloc(r, (size_t)PW * Hh * 2), *Cb = xalloc(r, (size_t)PW / 2 * Hh * 2), *Cr = xalloc(r, (size_t)PW / 2 * Hh * 2);
+    uint8_t *missing = xalloc(r, m->rows * m->cols);
+    float *err = xalloc(r, (size_t)HZ_N * ecap * sizeof(float));
+    uint16_t *errn = calloc(HZ_N, sizeof(uint16_t));
+    int16_t *slot_bin = NULL;
     int ret = -1;
-    if (!H || !trim || !E || !Tb || !X || !Tr || !slots || !Y || !Cb || !Cr || !missing || !err || !errn) goto out;
-    for (int j = 0; j < HZ_N_DATA; ++j) Er[j] = E + (size_t)j * HZ_N;
+    if (!H || !trim || !E || !Tb || !X || !Er || !Tr || !offsets || !slots || !Y || !Cb || !Cr || !missing || !err || !errn) goto out;
+    for (int j = 0; j < nd; ++j) Er[j] = E + (size_t)j * HZ_N;
     for (int t = 0; t < nt; ++t) Tr[t] = Tb + (size_t)t * HZ_N, symbol(r, a + 1 + t, Tr[t]);
     channel_from_training(Tr, nt, H);
     snprintf(name, sizeof name, "f%d.H", fi);
     dump(r, name, H, HZ_N * sizeof(hz_cf));
-    for (int j = 0; j < HZ_N_DATA; ++j) symbol(r, b + j, X), equalize(X, H, Er[j]);
-    int o0 = scattered_offset_d0(Er);
-    int offsets[HZ_N_DATA];
-    for (int j = 0; j < HZ_N_DATA; ++j) offsets[j] = pymod(o0 - 8 * j, 32);
+    for (int j = 0; j < nd; ++j) symbol(r, b + j, X), equalize(X, H, Er[j]);
+    int o0 = scattered_offset_d0(Er, nd);
+    for (int j = 0; j < nd; ++j) offsets[j] = pymod(o0 - 8 * j, 32);
     for (int t = 0; t < nt; ++t) {
         hz_cf *tmp = W->tmp;
         memcpy(tmp, Tr[t], HZ_N * sizeof(hz_cf));
         equalize(tmp, H, Tr[t]);
     }
-    per_bin_trim(Er, offsets, Tr, nt, trim);
-    for (int j = 0; j < HZ_N_DATA; ++j)
+    per_bin_trim(Er, offsets, nd, Tr, nt, trim);
+    for (int j = 0; j < nd; ++j)
         for (int k = 0; k < HZ_N; ++k) Er[j][k] *= trim[k];
     snprintf(name, sizeof name, "f%d.trim", fi);
     dump(r, name, trim, HZ_N * sizeof(hz_cf));
     snprintf(name, sizeof name, "f%d.E", fi);
-    dump(r, name, E, (size_t)HZ_N_DATA * HZ_N * sizeof(hz_cf));
+    dump(r, name, E, (size_t)nd * HZ_N * sizeof(hz_cf));
     int x_off = -1;
     if (xi >= 0) {
         hz_cf *tmp = W->tmp;
@@ -606,16 +618,27 @@ static int decode_frame(rx_t *r, int fi, int a, int b, int nxt, hz_frame_cb cb, 
 
     /* Section 7.1: data slots with specials skipped, then X. A bin is noisy if its median distance to the nearest
      * 16-QAM point is over 3x the frame's median; on the C5 that is about 90 bins above +355. */
-    hz_frame f = {.index = fi, .o0 = o0, .rot = bestq & 3, .hp_zero_fraction = bestz};
+    hz_frame f = {.index = fi, .mode = m, .width = PW, .height = Hh, .o0 = o0, .rot = bestq & 3, .hp_zero_fraction = bestz};
     int nslots = 0, entry = 0;
-    int16_t *slot_bin = malloc((size_t)(HZ_N_DATA + 1) * MAX_PTS * sizeof(int16_t));
+    slot_bin = malloc((size_t)(nd + 1) * MAX_PTS * sizeof(int16_t));
     if (!slot_bin) goto out;
-    for (int j = 0; j <= HZ_N_DATA; ++j) {
-        const hz_cf *z = j < HZ_N_DATA ? Er[j] : X;
-        int off = j < HZ_N_DATA ? offsets[j] : x_off;
-        if (j == HZ_N_DATA && xi < 0) break;
+    for (int j = 0; j <= nd; ++j) {
+        const hz_cf *z = j < nd ? Er[j] : X;
+        int off = j < nd ? offsets[j] : x_off;
+        if (j == nd) {
+            /* SPEC 7.2's gap rule: each special over the mode's count leaves out a symbol's worth of slots before X,
+             * that of the symbol just past the data. */
+            int extra = f.nspecials - m->specials;
+            if (extra > 0 && !o->no_gap) {
+                f.gap = extra * record_bins(pymod(o0 - 8 * nd, 32), bins);
+                memset(slots + nslots, 0x20, f.gap);
+                for (int i = 0; i < f.gap; ++i) slot_bin[nslots + i] = 0;
+                nslots += f.gap;
+            }
+            if (xi < 0) break;
+        }
         int n = points(z, off, rot, pts, bins);
-        if (j < HZ_N_DATA && is_special(pts, n)) {
+        if (j < nd && is_special(pts, n)) {
             if (f.nspecials < 32) f.specials[f.nspecials++] = j;
             continue;
         }
@@ -629,7 +652,7 @@ static int decode_frame(rx_t *r, int fi, int a, int b, int nxt, hz_frame_cb cb, 
                     ei = di < ei ? di : ei;
                 }
                 int k = bins[i] + 512;
-                if (errn[k] < 112) err[k * 112 + errn[k]++] = er + ei;
+                if (errn[k] < ecap) err[k * ecap + errn[k]++] = er + ei;
             }
         for (int i = 0; i < n; ++i) slots[nslots] = slot_bits(pts[i], i), slot_bin[nslots++] = bins[i];
     }
@@ -638,29 +661,30 @@ static int decode_frame(rx_t *r, int fi, int a, int b, int nxt, hz_frame_cb cb, 
     int nm = 0;
     float *meds = W->meds;
     for (int k = 0; k < HZ_N; ++k)
-        if (errn[k]) med[k] = median(err + k * 112, errn[k]), meds[nm++] = med[k];
+        if (errn[k]) med[k] = median(err + (size_t)k * ecap, errn[k]), meds[nm++] = med[k];
     float limit = 3 * median(meds, nm);
     for (int k = 0; k < HZ_N; ++k) noisy[k] = errn[k] && med[k] > limit;
-    for (int i = 0; i < nslots; ++i) slots[i] |= noisy[slot_bin[i] + 512] << 4;
-    free(slot_bin);
+    for (int i = 0; i < nslots; ++i)
+        if (!(slots[i] & 0x20)) slots[i] |= noisy[slot_bin[i] + 512] << 4;
     snprintf(name, sizeof name, "f%d.slots", fi);
     dump(r, name, slots, nslots);
     r->info->us[HZ_T_STREAM] += now(r) - t0;
     t0 = now(r);
 
-    f.nmissing = hz_decode_picture(slots, nslots, !o->no_conceal, Y, Cb, Cr, missing);
+    f.nmissing = hz_decode_picture(m, slots, nslots, !o->no_conceal, Y, Cb, Cr, missing);
     f.slots = slots, f.nslots = nslots, f.y = Y, f.cb = Cb, f.cr = Cr, f.missing = missing;
     r->info->us[HZ_T_CODEC] += now(r) - t0;
     snprintf(name, sizeof name, "f%d.Y", fi);
-    dump(r, name, Y, 720 * 960 * 2);
+    dump(r, name, Y, (size_t)PW * Hh * 2);
     snprintf(name, sizeof name, "f%d.Cb", fi);
-    dump(r, name, Cb, 720 * 480 * 2);
+    dump(r, name, Cb, (size_t)PW / 2 * Hh * 2);
     snprintf(name, sizeof name, "f%d.Cr", fi);
-    dump(r, name, Cr, 720 * 480 * 2);
+    dump(r, name, Cr, (size_t)PW / 2 * Hh * 2);
     if (cb) cb(ctx, &f);
     ret = 0;
 out:
-    xfree(r, H), xfree(r, trim), xfree(r, E), xfree(r, Tb), xfree(r, X), free(Tr), xfree(r, slots);
+    xfree(r, H), xfree(r, trim), xfree(r, E), xfree(r, Tb), xfree(r, X), free(Er), free(Tr), free(offsets), free(slot_bin);
+    xfree(r, slots);
     xfree(r, Y), xfree(r, Cb), xfree(r, Cr), xfree(r, missing), xfree(r, err), free(errn);
     return ret;
 }
@@ -699,9 +723,11 @@ int hz_receive(const uint16_t *raw, size_t n, double fs_in, const hz_opts *o, hz
     int frames = 0, max = o->max_frames > 0 ? o->max_frames : 99;
     for (int i = 0; i < info->nruns && frames < max; ++i) {
         int a = info->runs[i][0], b = info->runs[i][1];
-        if (b + HZ_N_DATA > info->nsym) break;
         int nxt = i + 1 < info->nruns ? info->runs[i + 1][0] : -1;
-        if (decode_frame(rp, frames, a, b, nxt, cb, ctx)) {
+        const hz_mode *m = o->mode ? hz_mode_by_name(o->mode) : hz_mode_detect(b - a, nxt >= 0 ? nxt - a : -1);
+        if (!m) m = &hz_modes[0];
+        if (b + m->ndata > info->nsym) break;
+        if (decode_frame(rp, frames, a, b, nxt, m, cb, ctx)) {
             frames = -1;
             break;
         }

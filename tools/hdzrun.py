@@ -81,7 +81,7 @@ def run(con, out, frames, dumps):
     sys.exit("hdz run: no reply in 120 s")
 
 
-def save_png(out, fi):
+def save_png(out, fi, fr):
     """The P4's planes through hdzrx's display stage."""
     hdz = pathlib.Path(os.environ.get("HDZERO_CAPTURES", HERE.parent / "hdzero-captures"))
     sys.path.insert(0, str(hdz))
@@ -90,8 +90,10 @@ def save_png(out, fi):
     planes = [np.fromfile(out / f"f{fi}.{p}.bin", np.int16).astype(float) for p in ("Y", "Cb", "Cr")]
     if any(len(p) == 0 for p in planes):
         return
-    Y, Cb, Cr = planes[0].reshape(720, 960), planes[1].reshape(720, 480), planes[2].reshape(720, 480)
-    Image.fromarray(codec.to_rgb(Y, Cb, Cr)).save(out / f"f{fi}.png")
+    w, h = fr.get("width", 960), fr.get("height", 720)
+    Y, Cb, Cr = planes[0].reshape(h, w), planes[1].reshape(h, w // 2), planes[2].reshape(h, w // 2)
+    wide = fr.get("mode", "720p60") != "960x720p60"
+    Image.fromarray(codec.to_rgb(Y, Cb, Cr, w * 4 // 3 if wide else w)).save(out / f"f{fi}.png")
 
 
 def main():
@@ -118,8 +120,9 @@ def main():
     if a.full:
         dumps += ["y"] + [f"f{i}.E" for i in range(a.frames)]
     info = run(con, out, a.frames, dumps)
-    for fi in range(info.get("frames", 0) if info else 0):
-        save_png(out, fi)
+    frames = json.loads((out / "frames.json").read_text()) if (out / "frames.json").exists() else []
+    for fi, fr in enumerate(frames):
+        save_png(out, fi, fr)
     print(f"-> {out}/", flush=True)
     if not a.no_compare and info:
         subprocess.run([sys.executable, str(HERE / "tools/hdzcompare.py"), prefix, "--c-dir", str(out), "--frames", str(a.frames)])
